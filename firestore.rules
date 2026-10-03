@@ -1,0 +1,139 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for Authentication and Role-Based Access Control (RBAC)
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasUserDoc() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'muhammadkhurram682@gmail.com') ||
+        (request.auth.token.role != null && (request.auth.token.role == 'super_admin' || request.auth.token.role == 'Super Admin')) ||
+        (hasUserDoc() && (getUserDoc().role == 'super_admin' || getUserDoc().role == 'Super Admin'))
+      );
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (request.auth.token.role != null && (request.auth.token.role == 'admin' || request.auth.token.role == 'Admin')) ||
+        (hasUserDoc() && (getUserDoc().role == 'admin' || getUserDoc().role == 'Admin'))
+      );
+    }
+
+    // Connection probe for initial boot health check
+    match /test/connection {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // System-wide Settings: readable by app users, strictly restricted to Super Admin for write/modify
+    match /settings/{settingId} {
+      allow read: if true;
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // User Directory & Profile Documents
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Restaurant Branches
+    match /branches/{branchId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Branch Fit-out & Launch Projects
+    match /projects/{projectId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Physical Assets (Electrical, Kitchen, HVAC, POS, Furniture)
+    match /assets/{assetId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Construction Milestones & Civil Costing
+    match /constructionCosts/{costId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Raw Material & Consumables Inventory SKUs
+    match /inventory/{itemId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Recipe & Culinary Menu Costing (COGS)
+    match /recipes/{recipeId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Stock Transactions & Consumption Records
+    match /stockTransactions/{txnId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // Purchase Orders & Invoices
+    match /purchases/{purchaseId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Suppliers & Contractor Vendors
+    match /suppliers/{supplierId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Operational Expenses
+    match /expenses/{expenseId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Location & Room Areas
+    match /locations/{locationId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Document Attachments & Handover Certificates
+    match /documents/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Security Audit Log (Immutable record)
+    match /auditLogs/{logId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // Global Safety Net: default deny for unmapped paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

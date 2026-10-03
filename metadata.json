@@ -1,0 +1,6 @@
+{
+  "name": "RestoSetup - Restaurant Branch Setup, Costing & Asset ERP",
+  "description": "Enterprise Restaurant Branch Setup, Construction Costing, Equipment Inventory and Asset Management System.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

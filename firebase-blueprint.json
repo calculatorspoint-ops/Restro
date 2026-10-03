@@ -1,0 +1,150 @@
+{
+  "entities": {
+    "Branch": {
+      "title": "Branch",
+      "description": "Restaurant branch location details and status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "province": { "type": "string" },
+        "contactNumber": { "type": "string" },
+        "branchManager": { "type": "string" },
+        "openingDate": { "type": "string" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "code", "name", "city", "status"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Branch setup and fit-out capital project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "projectName": { "type": "string" },
+        "startDate": { "type": "string" },
+        "expectedCompletionDate": { "type": "string" },
+        "projectManager": { "type": "string" },
+        "status": { "type": "string" },
+        "estimatedBudget": { "type": "number" },
+        "actualCost": { "type": "number" },
+        "remainingBudget": { "type": "number" },
+        "progressPercent": { "type": "number" }
+      },
+      "required": ["id", "branchId", "projectName", "estimatedBudget"]
+    },
+    "Asset": {
+      "title": "Asset",
+      "description": "Physical restaurant equipment and inventory asset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "locationId": { "type": "string" },
+        "locationName": { "type": "string" },
+        "category": { "type": "string" },
+        "subcategory": { "type": "string" },
+        "itemName": { "type": "string" },
+        "brand": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "unitCost": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "serialNumber": { "type": "string" },
+        "condition": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "branchId", "category", "itemName", "quantity", "unitCost", "totalCost"]
+    },
+    "ConstructionCost": {
+      "title": "ConstructionCost",
+      "description": "Civil, MEP, and interior construction milestone costing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "date": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "workArea": { "type": "string" },
+        "vendorContractor": { "type": "string" },
+        "totalCost": { "type": "number" },
+        "paymentStatus": { "type": "string" },
+        "paidAmount": { "type": "number" }
+      },
+      "required": ["id", "branchId", "category", "description", "totalCost"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Consumables, packaging, and raw material inventory SKU",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "itemCode": { "type": "string" },
+        "itemName": { "type": "string" },
+        "category": { "type": "string" },
+        "unit": { "type": "string" },
+        "branchId": { "type": "string" },
+        "warehouseLocation": { "type": "string" },
+        "currentStock": { "type": "number" },
+        "minimumLevel": { "type": "number" },
+        "unitCost": { "type": "number" },
+        "stockValue": { "type": "number" }
+      },
+      "required": ["id", "itemCode", "itemName", "branchId", "currentStock"]
+    },
+    "Recipe": {
+      "title": "Recipe",
+      "description": "Menu recipe formulation with linked ingredients, yields, and COGS margins",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "recipeCode": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "portionYield": { "type": "number" },
+        "totalFoodCost": { "type": "number" },
+        "totalCostPerPortion": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "grossMarginPercent": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "recipeCode", "name", "category", "sellingPrice"]
+    }
+  },
+  "firestore": {
+    "/branches/{branchId}": {
+      "schema": { "$ref": "#/entities/Branch" },
+      "description": "Restaurant branch establishments"
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Setup projects for branches"
+    },
+    "/assets/{assetId}": {
+      "schema": { "$ref": "#/entities/Asset" },
+      "description": "Physical asset registry across all branches"
+    },
+    "/constructionCosts/{costId}": {
+      "schema": { "$ref": "#/entities/ConstructionCost" },
+      "description": "Building and civil work milestones"
+    },
+    "/inventory/{inventoryId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Consumables, packaging, and food raw materials"
+    },
+    "/recipes/{recipeId}": {
+      "schema": { "$ref": "#/entities/Recipe" },
+      "description": "Menu recipes and culinary cost matrix"
+    }
+  }
+}

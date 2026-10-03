@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <rect x="2" y="2" width="60" height="60" rx="12" stroke="#10b981" stroke-opacity="0.3" stroke-width="2"/>
+  <!-- M Shape -->
+  <path d="M16 44V20L25 32L34 20V44" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- K Accent / Arrow -->
+  <path d="M37 20V44M48 20L37 32L49 44" stroke="#34d399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Subtle Dot Glow -->
+  <circle cx="50" cy="18" r="2.5" fill="#10b981"/>
+</svg>

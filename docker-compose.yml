@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  restosetup-erp:
+    build: .
+    container_name: restosetup-erp
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - ./data:/app/data
