@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Building2,
@@ -6,7 +7,7 @@ import {
   Boxes,
   Menu
 } from 'lucide-react';
-import { NavSection } from './Sidebar';
+import { NavSection, SECTION_TO_ROUTE } from './Sidebar';
 
 interface MobileBottomNavProps {
   activeSection: NavSection;
@@ -19,6 +20,18 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onSelectSection,
   onOpenMenu
 }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleNav = (section: NavSection) => {
+    navigate(SECTION_TO_ROUTE[section] || `/${section}`);
+    if (onSelectSection) onSelectSection(section);
+  };
+
+  const isCurrent = (section: NavSection) => {
+    return location.pathname === SECTION_TO_ROUTE[section] || activeSection === section;
+  };
+
   const isAssetsActive = [
     'construction',
     'electrical',
@@ -28,7 +41,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
     'it_pos',
     'general_assets',
     'locations'
-  ].includes(activeSection);
+  ].some((sec) => location.pathname === SECTION_TO_ROUTE[sec as NavSection] || activeSection === sec);
 
   const isOpsActive = [
     'inventory',
@@ -36,7 +49,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
     'purchases',
     'suppliers',
     'expenses'
-  ].includes(activeSection);
+  ].some((sec) => location.pathname === SECTION_TO_ROUTE[sec as NavSection] || activeSection === sec);
 
   return (
     <nav
@@ -47,40 +60,40 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         {/* 1. Dashboard */}
         <button
           type="button"
-          onClick={() => onSelectSection('dashboard')}
-          className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[48px] active:scale-95 ${
-            activeSection === 'dashboard'
-              ? 'text-emerald-700 font-bold'
+          onClick={() => handleNav('dashboard')}
+          className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[48px] active:scale-95 cursor-pointer ${
+            isCurrent('dashboard')
+              ? 'text-blue-600 font-bold'
               : 'text-slate-500 hover:text-slate-800'
           }`}
           aria-label="Dashboard"
         >
-          <LayoutDashboard className={`w-5 h-5 ${activeSection === 'dashboard' ? 'stroke-[2.5]' : ''}`} />
+          <LayoutDashboard className={`w-5 h-5 ${isCurrent('dashboard') ? 'stroke-[2.5]' : ''}`} />
           <span className="text-[10px] mt-0.5 leading-none">Home</span>
         </button>
 
         {/* 2. Branches */}
         <button
           type="button"
-          onClick={() => onSelectSection('branches')}
-          className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[48px] active:scale-95 ${
-            activeSection === 'branches'
-              ? 'text-emerald-700 font-bold'
+          onClick={() => handleNav('branches')}
+          className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[48px] active:scale-95 cursor-pointer ${
+            isCurrent('branches')
+              ? 'text-blue-600 font-bold'
               : 'text-slate-500 hover:text-slate-800'
           }`}
           aria-label="Branches"
         >
-          <Building2 className={`w-5 h-5 ${activeSection === 'branches' ? 'stroke-[2.5]' : ''}`} />
+          <Building2 className={`w-5 h-5 ${isCurrent('branches') ? 'stroke-[2.5]' : ''}`} />
           <span className="text-[10px] mt-0.5 leading-none">Branches</span>
         </button>
 
         {/* 3. Assets Quick Hub */}
         <button
           type="button"
-          onClick={() => onSelectSection('kitchen')}
-          className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[48px] active:scale-95 ${
+          onClick={() => handleNav('kitchen')}
+          className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[48px] active:scale-95 cursor-pointer ${
             isAssetsActive
-              ? 'text-emerald-700 font-bold'
+              ? 'text-blue-600 font-bold'
               : 'text-slate-500 hover:text-slate-800'
           }`}
           aria-label="Kitchen and Assets"
@@ -92,10 +105,10 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         {/* 4. Operations (Inventory/Purchases) */}
         <button
           type="button"
-          onClick={() => onSelectSection('inventory')}
-          className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[48px] active:scale-95 ${
+          onClick={() => handleNav('inventory')}
+          className={`flex flex-col items-center justify-center py-1 transition-colors min-h-[48px] active:scale-95 cursor-pointer ${
             isOpsActive
-              ? 'text-emerald-700 font-bold'
+              ? 'text-blue-600 font-bold'
               : 'text-slate-500 hover:text-slate-800'
           }`}
           aria-label="Operations & Stock"
@@ -108,7 +121,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         <button
           type="button"
           onClick={onOpenMenu}
-          className="flex flex-col items-center justify-center py-1 text-slate-500 hover:text-slate-900 transition-colors min-h-[48px] active:scale-95"
+          className="flex flex-col items-center justify-center py-1 text-slate-500 hover:text-slate-800 transition-colors min-h-[48px] active:scale-95 cursor-pointer"
           aria-label="Open Full Menu Drawer"
         >
           <Menu className="w-5 h-5" />

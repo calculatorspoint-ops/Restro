@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider, useData } from './context/DataContext';
-import { Sidebar, NavSection } from './components/layout/Sidebar';
+import { Sidebar, NavSection, SECTION_TO_ROUTE } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { AlertsDrawer } from './components/common/AlertsDrawer';
 import { Toast } from './components/common/Toast';
@@ -34,17 +35,33 @@ import { AuditLogPage } from './pages/AuditLogPage';
 import { LoginPage } from './pages/LoginPage';
 import { RecipesMenuCostingPage } from './pages/RecipesMenuCostingPage';
 import { BrandedDocumentsPage } from './pages/BrandedDocumentsPage';
+import { NotFoundPage } from './pages/NotFoundPage';
+import { ProtectedRoute } from './components/common/ProtectedRoute';
+
+const ROUTE_TO_SECTION: Record<string, NavSection> = Object.entries(SECTION_TO_ROUTE).reduce(
+  (acc, [sec, route]) => {
+    acc[route] = sec as NavSection;
+    return acc;
+  },
+  {} as Record<string, NavSection>
+);
 
 const MainLayout: React.FC = () => {
   const { isAuthenticated, authLoading } = useAuth();
-  const { loading, error, notification, clearNotification } = useData();
+  const { notification, clearNotification } = useData();
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  const [activeSection, setActiveSection] = useState<NavSection>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [alertsDrawerOpen, setAlertsDrawerOpen] = useState(false);
 
+  const activeSection: NavSection = useMemo(() => {
+    const currentPath = location.pathname.replace(/\/$/, '') || '/dashboard';
+    return ROUTE_TO_SECTION[currentPath] || 'dashboard';
+  }, [location.pathname]);
+
   if (authLoading) {
-    return <LoadingScreen message="Initializing session and database access..." />;
+    return <LoadingScreen message="Preparing your workspace" stage="Verifying session" />;
   }
 
   if (!isAuthenticated) {
@@ -127,71 +144,23 @@ const MainLayout: React.FC = () => {
     }
   };
 
-  const renderActivePage = () => {
-    switch (activeSection) {
-      case 'dashboard':
-        return <DashboardPage onNavigate={(sec) => setActiveSection(sec)} />;
-      case 'branches':
-        return <BranchesPage onNavigateToBranchDetail={() => setActiveSection('handover')} />;
-      case 'projects':
-        return <ProjectsPage />;
-      case 'construction':
-        return <ConstructionCostingPage />;
-      case 'electrical':
-        return <ElectricalLightingPage />;
-      case 'hvac':
-        return <HvacAcPage />;
-      case 'furniture':
-        return <FurniturePage />;
-      case 'kitchen':
-        return <KitchenEquipmentPage />;
-      case 'it_pos':
-        return <ItPosPage />;
-      case 'general_assets':
-        return <GeneralAssetRegisterPage />;
-      case 'inventory':
-        return <InventoryPage />;
-      case 'recipes':
-        return <RecipesMenuCostingPage />;
-      case 'purchases':
-        return <PurchasesPage />;
-      case 'suppliers':
-        return <SuppliersPage />;
-      case 'expenses':
-        return <ExpensesPage />;
-      case 'handover':
-        return <HandoverReportPage />;
-      case 'branded_docs':
-        return <BrandedDocumentsPage />;
-      case 'locations':
-        return <LocationRecordsPage />;
-      case 'reports':
-        return <ReportsPage />;
-      case 'excel':
-        return <ExcelCenterPage />;
-      case 'users':
-        return <UsersPage />;
-      case 'settings':
-        return <SettingsPage />;
-      case 'audit':
-        return <AuditLogPage />;
-      default:
-        return <DashboardPage onNavigate={(sec) => setActiveSection(sec)} />;
-    }
+  const handleNavigateSection = (sec: NavSection) => {
+    const route = SECTION_TO_ROUTE[sec] || `/${sec}`;
+    navigate(route);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex relative overflow-x-hidden selection:bg-blue-100 selection:text-blue-900">
       {/* Left Sidebar */}
       <Sidebar
         activeSection={activeSection}
-        onSelectSection={(sec) => setActiveSection(sec)}
+        onSelectSection={handleNavigateSection}
         mobileOpen={mobileSidebarOpen}
         onCloseMobile={() => setMobileSidebarOpen(false)}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 lg:pl-64">
+      <div className="flex-1 flex flex-col min-w-0 lg:pl-64 z-10 relative">
         <Header
           onToggleMobile={() => setMobileSidebarOpen(!mobileSidebarOpen)}
           onOpenAlerts={() => setAlertsDrawerOpen(true)}
@@ -200,7 +169,34 @@ const MainLayout: React.FC = () => {
         />
 
         <main className="flex-1 p-3.5 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto pb-20 lg:pb-8">
-          {renderActivePage()}
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<DashboardPage onNavigate={handleNavigateSection} />} />
+            <Route path="/branches" element={<BranchesPage onNavigateToBranchDetail={() => navigate('/handover')} />} />
+            <Route path="/projects" element={<ProjectsPage />} />
+            <Route path="/construction" element={<ConstructionCostingPage />} />
+            <Route path="/electrical" element={<ElectricalLightingPage />} />
+            <Route path="/hvac" element={<HvacAcPage />} />
+            <Route path="/furniture" element={<FurniturePage />} />
+            <Route path="/kitchen" element={<KitchenEquipmentPage />} />
+            <Route path="/it-pos" element={<ItPosPage />} />
+            <Route path="/assets" element={<GeneralAssetRegisterPage />} />
+            <Route path="/inventory" element={<InventoryPage />} />
+            <Route path="/recipes" element={<RecipesMenuCostingPage />} />
+            <Route path="/purchases" element={<PurchasesPage />} />
+            <Route path="/suppliers" element={<SuppliersPage />} />
+            <Route path="/expenses" element={<ExpensesPage />} />
+            <Route path="/handover" element={<HandoverReportPage />} />
+            <Route path="/branded-docs" element={<BrandedDocumentsPage />} />
+            <Route path="/locations" element={<LocationRecordsPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/excel" element={<ProtectedRoute path="/excel"><ExcelCenterPage /></ProtectedRoute>} />
+            <Route path="/users" element={<ProtectedRoute path="/users"><UsersPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute path="/settings"><SettingsPage /></ProtectedRoute>} />
+            <Route path="/audit" element={<ProtectedRoute path="/audit"><AuditLogPage /></ProtectedRoute>} />
+            <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
         </main>
 
         <Footer />
@@ -208,7 +204,7 @@ const MainLayout: React.FC = () => {
         {/* Mobile Bottom Navigation Bar (1-hand thumb operation) */}
         <MobileBottomNav
           activeSection={activeSection}
-          onSelectSection={(sec) => setActiveSection(sec)}
+          onSelectSection={handleNavigateSection}
           onOpenMenu={() => setMobileSidebarOpen(true)}
         />
       </div>
@@ -224,7 +220,8 @@ const MainLayout: React.FC = () => {
             Maintenance: 'hvac',
             Purchases: 'purchases'
           };
-          setActiveSection(modMap[mod] || 'dashboard');
+          const target = modMap[mod] || 'dashboard';
+          navigate(SECTION_TO_ROUTE[target] || `/${target}`);
         }}
       />
 
@@ -242,10 +239,12 @@ const MainLayout: React.FC = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <DataProvider>
-        <MainLayout />
-      </DataProvider>
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <DataProvider>
+          <MainLayout />
+        </DataProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

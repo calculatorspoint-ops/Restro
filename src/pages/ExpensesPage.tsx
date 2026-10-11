@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Receipt,
   Plus,
@@ -7,13 +7,17 @@ import {
   Calendar,
   DollarSign,
   Edit2,
-  Trash2
+  Trash2,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { Expense, ExpenseCategory } from '../types';
 import { Modal } from '../components/common/Modal';
 import { DeleteConfirmModal } from '../components/common/DeleteConfirmModal';
+import { Pagination } from '../components/common/Pagination';
+import { SkeletonTable } from '../components/common/Skeleton';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { exportToExcel } from '../utils/excel';
 
@@ -39,27 +43,38 @@ export const ExpensesPage: React.FC = () => {
     saveExpense,
     deleteExpense,
     selectedBranchId,
-    settings
+    settings,
+    loading
   } = useData();
   const { canDeleteRecords } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [methodFilter, setMethodFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Partial<Expense> | null>(null);
   const [deleteModalExpense, setDeleteModalExpense] = useState<Expense | null>(null);
 
+  useEffect(() => {
+    setCurrentPage((prev) => (prev === 1 ? prev : 1));
+  }, [searchTerm, categoryFilter, methodFilter, selectedBranchId]);
+
   const displayedExpenses = useMemo(() => {
     return filteredExpenses.filter((e) => {
-      const branch = branches.find((b) => b.id === e.branchId);
+      if (!e) return false;
+      const branch = branches.find((b) => b?.id === e.branchId);
+      const term = (searchTerm || '').toLowerCase();
       const matchesSearch =
-        e.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        e.vendor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        e.paidBy.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        e.referenceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (branch?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+        String(e.description || '').toLowerCase().includes(term) ||
+        String(e.vendor || '').toLowerCase().includes(term) ||
+        String(e.paidBy || '').toLowerCase().includes(term) ||
+        String(e.referenceNumber || '').toLowerCase().includes(term) ||
+        String(branch?.name || '').toLowerCase().includes(term);
 
       const matchesCat = categoryFilter === 'all' || e.category === categoryFilter;
       const matchesMethod = methodFilter === 'all' || e.paymentMethod === methodFilter;
@@ -67,6 +82,11 @@ export const ExpensesPage: React.FC = () => {
       return matchesSearch && matchesCat && matchesMethod;
     });
   }, [filteredExpenses, branches, searchTerm, categoryFilter, methodFilter]);
+
+  const paginatedExpenses = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return displayedExpenses.slice(startIndex, startIndex + pageSize);
+  }, [displayedExpenses, currentPage, pageSize]);
 
   const totalExpenseAmount = displayedExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
@@ -84,25 +104,54 @@ export const ExpensesPage: React.FC = () => {
       referenceNumber: `VOUCH-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
       remarks: ''
     });
+    setSubmitError(null);
     setIsFormOpen(true);
   };
 
   const handleOpenEdit = (exp: Expense) => {
     setEditingExpense({ ...exp });
+    setSubmitError(null);
     setIsFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    if (isSubmitting) return;
+    setIsFormOpen(false);
+    setEditingExpense(null);
+    setSubmitError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingExpense || !editingExpense.branchId || !editingExpense.description) return;
+    if (!editingExpense || !editingExpense.branchId || !editingExpense.description || isSubmitting) return;
 
-    await saveExpense({
-      ...editingExpense,
-      amount: Number(editingExpense.amount) || 0
-    });
+    try {
+      setIsSubmitting(true);
+      setSubmitError(null);
+      await saveExpense({
+        ...editingExpense,
+        amount: Number(editingExpense.amount) || 0
+      });
 
-    setIsFormOpen(false);
-    setEditingExpense(null);
+      // Dialog automatically closes ONLY after Firestore mutation succeeds
+      setIsFormOpen(false);
+      setEditingExpense(null);
+    } catch (err: any) {
+      console.error('Failed to save expense:', err);
+      const rawMsg = err?.message || String(err || '');
+      if (
+        rawMsg.includes('Missing or insufficient permissions') ||
+        rawMsg.includes('permission-denied')
+      ) {
+        setSubmitError(
+          'Permission Denied: Your account role is not authorized to log expenses for this branch.'
+        );
+      } else {
+        setSubmitError(rawMsg && rawMsg.length < 160 ? rawMsg : 'Failed to record expense. Please try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleExport = () => {
@@ -207,7 +256,7 @@ export const ExpensesPage: React.FC = () => {
           </button>
           <button
             onClick={handleOpenCreate}
-            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5"
+            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" />
             <span>Record Expense</span>
@@ -217,151 +266,170 @@ export const ExpensesPage: React.FC = () => {
 
       {/* Expenses Display: Desktop Table + Mobile Responsive Cards */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-xs">
-        {/* Desktop Table View */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-semibold">
-              <tr>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Branch</th>
-                <th className="py-3 px-4">Category</th>
-                <th className="py-3 px-4">Description</th>
-                <th className="py-3 px-4">Vendor / Payee</th>
-                <th className="py-3 px-4">Paid By / Method</th>
-                <th className="py-3 px-4">Ref #</th>
-                <th className="py-3 px-4 text-right">Amount (PKR)</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {displayedExpenses.map((exp) => {
+        {loading && displayedExpenses.length === 0 ? (
+          <SkeletonTable columns={9} rows={8} />
+        ) : (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-semibold">
+                  <tr>
+                    <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4">Branch</th>
+                    <th className="py-3 px-4">Category</th>
+                    <th className="py-3 px-4">Description</th>
+                    <th className="py-3 px-4">Vendor / Payee</th>
+                    <th className="py-3 px-4">Paid By / Method</th>
+                    <th className="py-3 px-4">Ref #</th>
+                    <th className="py-3 px-4 text-right">Amount (PKR)</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {paginatedExpenses.map((exp) => {
+                    const branch = branches.find((b) => b.id === exp.branchId);
+
+                    return (
+                      <tr key={exp.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
+                          {formatDate(exp.date)}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="font-semibold text-slate-800 block">{branch?.code}</span>
+                          <span className="text-[11px] text-slate-400 block">{branch?.city}</span>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap font-medium text-slate-900">
+                          {exp.category}
+                        </td>
+                        <td className="py-3 px-4 min-w-[200px] text-slate-700">
+                          {exp.description}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap text-slate-800">
+                          {exp.vendor || '-'}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="text-slate-800 block">{exp.paidBy}</span>
+                          <span className="text-[11px] text-slate-400 block">{exp.paymentMethod}</span>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-500 whitespace-nowrap">
+                          {exp.referenceNumber}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
+                          {formatCurrency(exp.amount, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => handleOpenEdit(exp)}
+                              className="min-h-[36px] min-w-[36px] flex items-center justify-center text-slate-500 hover:text-slate-900 rounded-md hover:bg-slate-100"
+                              title="Edit Expense"
+                              aria-label={`Edit ${exp.description}`}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            {canDeleteRecords && (
+                              <button
+                                onClick={() => setDeleteModalExpense(exp)}
+                                className="min-h-[36px] min-w-[36px] flex items-center justify-center text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50"
+                                title="Delete Expense"
+                                aria-label={`Delete ${exp.description}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Phone Cards View (Optimized for 320px - 767px) */}
+            <div className="block md:hidden divide-y divide-slate-100 p-2 sm:p-3 space-y-2.5">
+              {paginatedExpenses.map((exp) => {
                 const branch = branches.find((b) => b.id === exp.branchId);
 
                 return (
-                  <tr key={exp.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
-                      {formatDate(exp.date)}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className="font-semibold text-slate-800 block">{branch?.code}</span>
-                      <span className="text-[11px] text-slate-400 block">{branch?.city}</span>
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap font-medium text-slate-900">
-                      {exp.category}
-                    </td>
-                    <td className="py-3 px-4 min-w-[200px] text-slate-700">
-                      {exp.description}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap text-slate-800">
-                      {exp.vendor || '-'}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className="text-slate-800 block">{exp.paidBy}</span>
-                      <span className="text-[11px] text-slate-400 block">{exp.paymentMethod}</span>
-                    </td>
-                    <td className="py-3 px-4 font-mono text-slate-500 whitespace-nowrap">
-                      {exp.referenceNumber}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
-                      {formatCurrency(exp.amount, settings.currencySymbol)}
-                    </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleOpenEdit(exp)}
-                          className="min-h-[36px] min-w-[36px] flex items-center justify-center text-slate-500 hover:text-slate-900 rounded-md hover:bg-slate-100"
-                          title="Edit Expense"
-                          aria-label={`Edit ${exp.description}`}
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        {canDeleteRecords && (
-                          <button
-                            onClick={() => setDeleteModalExpense(exp)}
-                            className="min-h-[36px] min-w-[36px] flex items-center justify-center text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50"
-                            title="Delete Expense"
-                            aria-label={`Delete ${exp.description}`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                  <div
+                    key={exp.id}
+                    className="bg-slate-50/70 border border-slate-200 rounded-lg p-3 space-y-2 text-xs"
+                  >
+                    {/* Header: Description + Category + Date */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-sm leading-snug">{exp.description}</h4>
+                        <span className="font-mono text-[10px] text-slate-400">
+                          {formatDate(exp.date)} · Ref: {exp.referenceNumber}
+                        </span>
                       </div>
-                    </td>
-                  </tr>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-sm bg-white border border-slate-200 text-slate-800 shrink-0">
+                        {exp.category}
+                      </span>
+                    </div>
+
+                    {/* Details snippet */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white p-2 rounded-md border border-slate-100">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Branch & Payee</span>
+                        <span className="font-semibold text-slate-800">{branch?.code || 'Consolidated'}</span> · {exp.vendor || 'Direct Pay'}
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Paid By / Method</span>
+                        <span className="text-slate-800 font-medium">{exp.paidBy}</span> ({exp.paymentMethod})
+                      </div>
+                    </div>
+
+                    {/* Amount strip */}
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60 font-mono">
+                      <span className="text-slate-400 text-[10px] font-sans">Voucher Total:</span>
+                      <span className="font-bold text-slate-900 text-sm">{formatCurrency(exp.amount, settings.currencySymbol)}</span>
+                    </div>
+
+                    {/* Touch actions */}
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200/80">
+                      <button
+                        onClick={() => handleOpenEdit(exp)}
+                        className="min-h-[36px] px-3 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-md flex items-center gap-1 active:bg-slate-200"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+                      {canDeleteRecords && (
+                        <button
+                          onClick={() => setDeleteModalExpense(exp)}
+                          className="min-h-[36px] px-2.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md flex items-center gap-1 active:bg-rose-200"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+            </div>
 
-        {/* Mobile Phone Cards View (Optimized for 320px - 767px) */}
-        <div className="block md:hidden divide-y divide-slate-100 p-2 sm:p-3 space-y-2.5">
-          {displayedExpenses.map((exp) => {
-            const branch = branches.find((b) => b.id === exp.branchId);
-
-            return (
-              <div
-                key={exp.id}
-                className="bg-slate-50/70 border border-slate-200 rounded-lg p-3 space-y-2 text-xs"
-              >
-                {/* Header: Description + Category + Date */}
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h4 className="font-bold text-slate-900 text-sm leading-snug">{exp.description}</h4>
-                    <span className="font-mono text-[10px] text-slate-400">
-                      {formatDate(exp.date)} · Ref: {exp.referenceNumber}
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-sm bg-white border border-slate-200 text-slate-800 shrink-0">
-                    {exp.category}
-                  </span>
-                </div>
-
-                {/* Details snippet */}
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white p-2 rounded-md border border-slate-100">
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Branch & Payee</span>
-                    <span className="font-semibold text-slate-800">{branch?.code || 'Consolidated'}</span> · {exp.vendor || 'Direct Pay'}
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Paid By / Method</span>
-                    <span className="text-slate-800 font-medium">{exp.paidBy}</span> ({exp.paymentMethod})
-                  </div>
-                </div>
-
-                {/* Amount strip */}
-                <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60 font-mono">
-                  <span className="text-slate-400 text-[10px] font-sans">Voucher Total:</span>
-                  <span className="font-bold text-slate-900 text-sm">{formatCurrency(exp.amount, settings.currencySymbol)}</span>
-                </div>
-
-                {/* Touch actions */}
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200/80">
-                  <button
-                    onClick={() => handleOpenEdit(exp)}
-                    className="min-h-[36px] px-3 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-md flex items-center gap-1 active:bg-slate-200"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                    <span>Edit</span>
-                  </button>
-                  {canDeleteRecords && (
-                    <button
-                      onClick={() => setDeleteModalExpense(exp)}
-                      className="min-h-[36px] px-2.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md flex items-center gap-1 active:bg-rose-200"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+            {displayedExpenses.length === 0 && (
+              <div className="p-12 text-center text-slate-500 text-xs">
+                No expenses found. Click "Record Expense" to log daily site disbursements or operational bills.
               </div>
-            );
-          })}
-        </div>
+            )}
 
-        {displayedExpenses.length === 0 && (
-          <div className="p-12 text-center text-slate-500 text-xs">
-            No expenses found. Click "Record Expense" to log daily site disbursements or operational bills.
-          </div>
+            {displayedExpenses.length > 0 && (
+              <Pagination
+                currentPage={currentPage}
+                totalItems={displayedExpenses.length}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={(newSize) => {
+                  setPageSize(newSize);
+                  setCurrentPage(1);
+                }}
+              />
+            )}
+          </>
         )}
       </div>
 
@@ -369,12 +437,19 @@ export const ExpensesPage: React.FC = () => {
       {isFormOpen && editingExpense && (
         <Modal
           isOpen={isFormOpen}
-          onClose={() => setIsFormOpen(false)}
+          onClose={handleCloseForm}
           title={editingExpense.id ? 'Edit Expense Voucher' : 'Record Branch Expense'}
           subtitle="Log labour, transport, utilities, maintenance, or miscellaneous costs"
           maxWidth="2xl"
         >
           <form onSubmit={handleSave} className="space-y-4">
+            {submitError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <div className="flex-1 font-medium leading-relaxed">{submitError}</div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -526,16 +601,25 @@ export const ExpensesPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setIsFormOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md"
+                disabled={isSubmitting}
+                onClick={handleCloseForm}
+                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md"
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md flex items-center gap-1.5"
               >
-                {editingExpense.id ? 'Save Voucher' : 'Record Expense'}
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>
+                  {isSubmitting
+                    ? 'Saving...'
+                    : editingExpense.id
+                    ? 'Save Voucher'
+                    : 'Record Expense'}
+                </span>
               </button>
             </div>
           </form>

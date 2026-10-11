@@ -314,7 +314,7 @@ export const ReportsPage: React.FC = () => {
           </button>
           <button
             onClick={handlePrint}
-            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5"
+            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-1.5"
           >
             <Printer className="w-3.5 h-3.5" />
             <span>Print Report</span>
@@ -392,14 +392,15 @@ export const ReportsPage: React.FC = () => {
                       <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
                         {Object.entries(row).map(([k, val]: [string, any], vIdx: number) => {
                           const isNumber = typeof val === 'number';
+                          const kLower = String(k || '').toLowerCase();
                           const isCost =
-                            k.toLowerCase().includes('cost') ||
-                            k.toLowerCase().includes('budget') ||
-                            k.toLowerCase().includes('variance') ||
-                            k.toLowerCase().includes('amount') ||
-                            k.toLowerCase().includes('total') ||
-                            k.toLowerCase().includes('value') ||
-                            k.toLowerCase().includes('paid');
+                            kLower.includes('cost') ||
+                            kLower.includes('budget') ||
+                            kLower.includes('variance') ||
+                            kLower.includes('amount') ||
+                            kLower.includes('total') ||
+                            kLower.includes('value') ||
+                            kLower.includes('paid');
 
                           return (
                             <td

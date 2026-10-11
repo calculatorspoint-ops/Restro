@@ -1,5 +1,27 @@
 @import "tailwindcss";
 
+:root {
+  /* RestoSetup Official Design Tokens */
+  --color-primary: #0F172A;
+  --color-primary-hover: #1E293B;
+  --color-secondary: #334155;
+  --color-brand: #0F766E;
+  --color-brand-hover: #115E59;
+  --color-brand-bright: #14B8A6;
+  --color-bg: #F8FAFC;
+  --color-surface: #FFFFFF;
+  --color-border: #E2E8F0;
+  --color-text: #0F172A;
+  --color-text-secondary: #64748B;
+
+  /* Functional Semantics */
+  --color-success: #16A34A;
+  --color-info: #2563EB;
+  --color-warning: #D97706;
+  --color-danger: #DC2626;
+  --color-special: #7C3AED;
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
@@ -10,6 +32,8 @@
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     -webkit-tap-highlight-color: transparent;
     overflow-x: hidden;
+    background-color: #F8FAFC;
+    color: #0F172A;
   }
   
   .font-mono, .tabular-nums {
@@ -27,6 +51,45 @@
   /* Safe area padding for mobile notches and bottom bars */
   .safe-area-bottom {
     padding-bottom: env(safe-area-inset-bottom, 1rem);
+  }
+
+  /* Universal enterprise loading line progress animation */
+  @keyframes loadingProgress {
+    0% {
+      transform: translateX(-120%);
+    }
+    50% {
+      transform: translateX(120%);
+    }
+    100% {
+      transform: translateX(360%);
+    }
+  }
+
+  .animate-loading-line {
+    animation: loadingProgress 1.6s ease-in-out infinite;
+  }
+}
+
+/* Custom scrollbar styling for dense enterprise dashboards */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F8FAFC;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-loading-line {
+    animation-duration: 4s;
   }
 }
 

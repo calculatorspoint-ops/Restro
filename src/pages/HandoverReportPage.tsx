@@ -53,9 +53,9 @@ export const HandoverReportPage: React.FC = () => {
     window.print();
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     if (!branch) return;
-    const doc = exportAssetHandoverPDF({
+    const doc = await exportAssetHandoverPDF({
       branch,
       project,
       settings,
@@ -133,7 +133,7 @@ export const HandoverReportPage: React.FC = () => {
             </button>
             <button
               onClick={handlePrint}
-              className="min-h-[40px] px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 active:bg-slate-950 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+              className="min-h-[40px] px-3.5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-slate-950 rounded-lg transition-colors flex items-center justify-center gap-1.5"
             >
               <Printer className="w-4 h-4" />
               <span>Print Document</span>

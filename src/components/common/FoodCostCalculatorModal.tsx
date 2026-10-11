@@ -40,8 +40,10 @@ export const FoodCostCalculatorModal: React.FC<FoodCostCalculatorModalProps> = (
 
   useEffect(() => {
     if (isOpen) {
-      setCostInput(String(initialCost || 350));
-      setSellingPriceInput(String(initialPrice || 1200));
+      const nextCost = String(initialCost || 350);
+      const nextPrice = String(initialPrice || 1200);
+      setCostInput((prev) => (prev === nextCost ? prev : nextCost));
+      setSellingPriceInput((prev) => (prev === nextPrice ? prev : nextPrice));
     }
   }, [isOpen, initialCost, initialPrice]);
 
@@ -95,7 +97,7 @@ export const FoodCostCalculatorModal: React.FC<FoodCostCalculatorModalProps> = (
       } else if (e.key === 'Backspace') {
         e.preventDefault();
         handleKeypadPress('BACK');
-      } else if (e.key.toLowerCase() === 'c') {
+      } else if (e.key?.toLowerCase() === 'c') {
         e.preventDefault();
         handleKeypadPress('C');
       } else if (e.key === 'Tab') {

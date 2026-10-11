@@ -77,8 +77,8 @@ export const api = {
   // Generic Delete
   async deleteItem(collection: string, id: string, currentUser?: { name: string; role: string }): Promise<void> {
     const query = new URLSearchParams({
-      userName: currentUser?.name || 'Admin',
-      userRole: currentUser?.role || 'super_admin'
+      userName: currentUser?.name || 'Administrator',
+      userRole: currentUser?.role || 'super_manager'
     });
     const res = await fetch(`/api/${collection}/${id}?${query.toString()}`, {
       method: 'DELETE'

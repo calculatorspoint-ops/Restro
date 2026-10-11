@@ -1,13 +1,81 @@
-export type UserRole = 'super_admin' | 'admin' | 'staff';
+export type UserRole = 'super_manager' | 'super_admin' | 'manager' | 'admin' | 'staff';
+
+export function isSuperManagerRole(role?: string): boolean {
+  if (!role || typeof role !== 'string') return false;
+  const normalized = role.toLowerCase().replace(/[\s-]/g, '_');
+  return normalized === 'super_manager' || normalized === 'super_admin';
+}
+
+export function isManagerRole(role?: string): boolean {
+  if (!role || typeof role !== 'string') return false;
+  const normalized = role.toLowerCase().replace(/[\s-]/g, '_');
+  return normalized === 'manager' || normalized === 'admin' || isSuperManagerRole(role);
+}
+
+export function isStaffRole(role?: string): boolean {
+  if (!role || typeof role !== 'string') return false;
+  const normalized = role.toLowerCase().replace(/[\s-]/g, '_');
+  return normalized === 'staff' && !isSuperManagerRole(role) && !isManagerRole(role);
+}
+
+export function getRoleDisplayName(role?: string, isMasterAdmin?: boolean): string {
+  if (isMasterAdmin) return 'Super Manager';
+  if (!role) return 'Staff';
+  if (isSuperManagerRole(role)) return 'Super Manager';
+  if (isManagerRole(role)) return 'Manager';
+  return 'Staff';
+}
+
+/**
+ * Granular Permissions Architecture
+ */
+export interface CrudPermissions {
+  view: boolean;
+  create: boolean;
+  edit: boolean;
+  delete: boolean;
+}
+
+export interface AppPermissions {
+  dashboard: { view: boolean };
+  branches: CrudPermissions;
+  projects: CrudPermissions;
+  construction: CrudPermissions;
+  assets: CrudPermissions;
+  inventory: CrudPermissions;
+  purchases: CrudPermissions & { approve: boolean };
+  suppliers: CrudPermissions;
+  expenses: CrudPermissions;
+  recipes: CrudPermissions;
+  locations: CrudPermissions;
+  handover: CrudPermissions;
+  documents: CrudPermissions;
+  reports: { view: boolean; export: boolean };
+  excel: { import: boolean; export: boolean };
+  audit: { view: boolean };
+  users: CrudPermissions & { manage_roles: boolean; manage_permissions: boolean };
+  settings: { view: boolean; edit: boolean };
+}
+
+export type PermissionModuleName = keyof AppPermissions;
 
 export interface User {
   id: string;
+  userId?: string; // Tenant/owner user ID
   name: string;
   email: string;
   role: UserRole;
+  isMasterAdmin?: boolean; // Protected Master Admin permanent flag
   assignedBranchIds: string[]; // ['all'] or array of branch IDs
   phone?: string;
   status: 'active' | 'inactive';
+  permissions?: AppPermissions; // Computed effective permissions
+  customPermissionOverrides?: Partial<Record<string, Record<string, boolean>>>; // Optional overrides
+  password?: string; // Optional user password for credentials management
+  passwordLastChangedAt?: string; // Timestamp of last password change
+  mustChangePassword?: boolean; // Flag to require password change upon next login
+  firebaseUid?: string; // Linked Firebase Authentication UID
+  firebaseAuthSynced?: boolean; // Whether account credentials exist in Firebase Authentication
   createdAt: string;
   updatedAt?: string;
 }
@@ -16,6 +84,7 @@ export type BranchStatus = 'Planning' | 'Under Construction' | 'Setup in Progres
 
 export interface Branch {
   id: string;
+  userId?: string;
   code: string;
   name: string;
   address: string;
@@ -37,6 +106,7 @@ export type ProjectStatus = 'Planning' | 'In Progress' | 'Near Completion' | 'Co
 
 export interface Project {
   id: string;
+  userId?: string;
   branchId: string;
   projectName: string;
   startDate: string;
@@ -57,6 +127,7 @@ export interface Project {
 
 export interface LocationArea {
   id: string;
+  userId?: string;
   branchId: string;
   name: string;
   code: string;
@@ -85,6 +156,7 @@ export type PaymentStatus = 'Paid' | 'Unpaid' | 'Partial';
 
 export interface ConstructionCost {
   id: string;
+  userId?: string;
   branchId: string;
   date: string;
   category: ConstructionCategory;
@@ -132,6 +204,7 @@ export type AssetStatus =
 
 export interface Asset {
   id: string;
+  userId?: string;
   branchId: string;
   locationId: string;
   locationName: string;
@@ -175,6 +248,7 @@ export interface Asset {
 
 export interface InventoryItem {
   id: string;
+  userId?: string;
   itemCode: string;
   itemName: string;
   category: string;
@@ -201,6 +275,7 @@ export type StockTransactionType = 'STOCK_IN' | 'STOCK_OUT' | 'TRANSFER' | 'ADJU
 
 export interface StockTransaction {
   id: string;
+  userId?: string;
   inventoryItemId: string;
   itemName: string;
   branchId: string;
@@ -228,6 +303,7 @@ export type DeliveryStatus = 'Draft' | 'Ordered' | 'Partially Received' | 'Recei
 
 export interface PurchaseOrder {
   id: string;
+  userId?: string;
   poNumber: string;
   date: string;
   branchId: string;
@@ -250,6 +326,7 @@ export interface PurchaseOrder {
 
 export interface Supplier {
   id: string;
+  userId?: string;
   name: string;
   contactPerson: string;
   phone: string;
@@ -282,6 +359,7 @@ export type ExpenseCategory =
 
 export interface Expense {
   id: string;
+  userId?: string;
   branchId: string;
   date: string;
   category: ExpenseCategory;
@@ -299,6 +377,7 @@ export interface Expense {
 
 export interface DocumentAttachment {
   id: string;
+  userId?: string;
   branchId: string;
   module: 'Asset' | 'Construction' | 'Purchase' | 'Expense' | 'Branch' | 'General';
   recordId?: string;
@@ -313,6 +392,7 @@ export interface DocumentAttachment {
 
 export interface AuditLog {
   id: string;
+  userId?: string;
   userName: string;
   userRole: string;
   action: 'Created' | 'Updated' | 'Deleted' | 'Imported' | 'Exported' | 'Transferred';
@@ -345,6 +425,7 @@ export interface RecipeIngredient {
 
 export interface Recipe {
   id: string;
+  userId?: string;
   recipeCode: string;
   name: string;
   category: 'Mains' | 'Starters' | 'Beverages' | 'Desserts' | 'Bakery' | 'Sauces & Bases';

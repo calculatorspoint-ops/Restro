@@ -1,7 +1,15 @@
-import { jsPDF } from 'jspdf';
-import autoTable, { UserOptions } from 'jspdf-autotable';
+import type { jsPDF } from 'jspdf';
+import type { UserOptions } from 'jspdf-autotable';
 import { Branch, Project, Asset, ConstructionCost, SystemSettings } from '../types';
 import { BRAND } from '../config/brand';
+
+// Dynamic loader for heavy PDF generation libraries
+const loadPDFModules = async () => {
+  const { jsPDF } = await import('jspdf');
+  const autoTableModule = await import('jspdf-autotable');
+  const autoTable = (autoTableModule as any).default || autoTableModule;
+  return { jsPDF, autoTable };
+};
 
 // Palette definitions for crisp enterprise PDF printing
 const COLORS = {
@@ -242,7 +250,7 @@ function drawSignatureBlocks(
 // 1. PRE-HANDOVER CIVIL, MEP & EQUIPMENT INSPECTION SHEET
 // =========================================================================
 
-export function exportInspectionSheetPDF(params: InspectionSheetParams): jsPDF {
+export async function exportInspectionSheetPDF(params: InspectionSheetParams): Promise<jsPDF> {
   const {
     branch,
     project,
@@ -254,6 +262,7 @@ export function exportInspectionSheetPDF(params: InspectionSheetParams): jsPDF {
     docReference = `MKI-INS-${branch.code}-${Date.now().toString().slice(-4)}`
   } = params;
 
+  const { jsPDF, autoTable } = await loadPDFModules();
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
   // 1. Branded Header
@@ -299,7 +308,7 @@ export function exportInspectionSheetPDF(params: InspectionSheetParams): jsPDF {
       2: { cellWidth: 26, fontStyle: 'bold' },
       3: { cellWidth: 54 }
     },
-    didParseCell: (data) => {
+    didParseCell: (data: any) => {
       if (data.section === 'body' && data.column.index === 2) {
         const val = String(data.cell.raw).toUpperCase();
         if (val.includes('PASSED')) {
@@ -347,7 +356,7 @@ export function exportInspectionSheetPDF(params: InspectionSheetParams): jsPDF {
 // 2. CONTRACTOR MILESTONE PAYMENT VERIFICATION VOUCHER
 // =========================================================================
 
-export function exportPaymentVoucherPDF(params: PaymentVoucherParams): jsPDF {
+export async function exportPaymentVoucherPDF(params: PaymentVoucherParams): Promise<jsPDF> {
   const {
     branch,
     project,
@@ -361,6 +370,7 @@ export function exportPaymentVoucherPDF(params: PaymentVoucherParams): jsPDF {
     notes = 'Payment authorized subject to 90-day defect liability period.'
   } = params;
 
+  const { jsPDF, autoTable } = await loadPDFModules();
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
   // 1. Branded Header
@@ -436,7 +446,7 @@ export function exportPaymentVoucherPDF(params: PaymentVoucherParams): jsPDF {
       2: { cellWidth: 32, fontStyle: 'bold' },
       3: { cellWidth: 30, halign: 'right', fontStyle: 'bold' }
     },
-    didParseCell: (data) => {
+    didParseCell: (data: any) => {
       if (data.section === 'body' && data.row.index === 2) {
         data.cell.styles.fillColor = [236, 253, 245]; // emerald-50
         data.cell.styles.textColor = COLORS.emeraldDark;
@@ -481,7 +491,7 @@ export function exportPaymentVoucherPDF(params: PaymentVoucherParams): jsPDF {
 // 3. CAPITAL ASSET & EQUIPMENT HANDOVER CERTIFICATE
 // =========================================================================
 
-export function exportAssetHandoverPDF(params: AssetHandoverParams): jsPDF {
+export async function exportAssetHandoverPDF(params: AssetHandoverParams): Promise<jsPDF> {
   const {
     branch,
     project,
@@ -494,6 +504,7 @@ export function exportAssetHandoverPDF(params: AssetHandoverParams): jsPDF {
     custodyTerms = 'The Branch General Manager assumes operational custody and accountability for all listed equipment, fixtures, and capital assets.'
   } = params;
 
+  const { jsPDF, autoTable } = await loadPDFModules();
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
   // 1. Branded Header

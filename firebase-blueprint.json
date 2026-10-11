@@ -1,5 +1,22 @@
 {
   "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with enterprise role (Super Manager, Manager, Staff) and branch scoping",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_manager", "super_admin", "manager", "admin", "staff"] },
+        "assignedBranchIds": { "type": "array", "items": { "type": "string" } },
+        "phone": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role", "status"]
+    },
     "Branch": {
       "title": "Branch",
       "description": "Restaurant branch location details and status",
@@ -122,6 +139,10 @@
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User account profiles and assigned role credentials"
+    },
     "/branches/{branchId}": {
       "schema": { "$ref": "#/entities/Branch" },
       "description": "Restaurant branch establishments"

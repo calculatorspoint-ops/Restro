@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Search, Calendar, User, DollarSign, Edit2, Trash2, FolderKanban, CheckCircle2 } from 'lucide-react';
+import { Plus, Search, Calendar, User, DollarSign, Edit2, Trash2, FolderKanban, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { Project, ProjectStatus } from '../types';
@@ -18,19 +18,23 @@ export const ProjectsPage: React.FC = () => {
     settings,
     getBranchCostBreakdown
   } = useData();
-  const { canDeleteRecords } = useAuth();
+  const { canManageProjects, canDeleteProjects } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Partial<Project> | null>(null);
   const [deleteModalProject, setDeleteModalProject] = useState<Project | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const displayProjects = filteredProjects.filter((p) => {
-    const branch = branches.find((b) => b.id === p.branchId);
+    if (!p) return false;
+    const branch = branches.find((b) => b?.id === p.branchId);
+    const term = (searchTerm || '').toLowerCase();
     return (
-      p.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.projectManager.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (branch?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
+      String(p.projectName || '').toLowerCase().includes(term) ||
+      String(p.projectManager || '').toLowerCase().includes(term) ||
+      String(branch?.name || '').toLowerCase().includes(term)
     );
   });
 
@@ -49,31 +53,62 @@ export const ProjectsPage: React.FC = () => {
       progressPercent: 20,
       notes: ''
     });
+    setSubmitError(null);
     setIsFormOpen(true);
   };
 
   const handleOpenEdit = (project: Project) => {
     setEditingProject({ ...project });
+    setSubmitError(null);
     setIsFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    if (isSubmitting) return;
+    setIsFormOpen(false);
+    setEditingProject(null);
+    setSubmitError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingProject || !editingProject.projectName || !editingProject.branchId) return;
+    if (!editingProject || !editingProject.projectName || !editingProject.branchId || isSubmitting) return;
 
-    const estimated = Number(editingProject.estimatedBudget) || 0;
-    const actual = Number(editingProject.actualCost) || 0;
-    const remaining = estimated - actual;
+    try {
+      setIsSubmitting(true);
+      setSubmitError(null);
+      const estimated = Number(editingProject.estimatedBudget) || 0;
+      const actual = Number(editingProject.actualCost) || 0;
+      const remaining = estimated - actual;
 
-    await saveProject({
-      ...editingProject,
-      estimatedBudget: estimated,
-      actualCost: actual,
-      remainingBudget: remaining
-    });
+      await saveProject({
+        ...editingProject,
+        estimatedBudget: estimated,
+        actualCost: actual,
+        remainingBudget: remaining
+      });
 
-    setIsFormOpen(false);
-    setEditingProject(null);
+      // Dialog automatically closes ONLY after Firestore mutation succeeds
+      setIsFormOpen(false);
+      setEditingProject(null);
+    } catch (err: any) {
+      console.error('Failed to save project:', err);
+      const rawMsg = err?.message || String(err || '');
+      if (
+        rawMsg.includes('Missing or insufficient permissions') ||
+        rawMsg.includes('permission-denied')
+      ) {
+        setSubmitError(
+          'Permission Denied: Your account role is not authorized to modify setup projects.'
+        );
+      } else {
+        setSubmitError(
+          rawMsg && rawMsg.length < 160 ? rawMsg : 'Failed to save project to Firestore. Please try again.'
+        );
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -91,13 +126,15 @@ export const ProjectsPage: React.FC = () => {
           />
         </div>
 
-        <button
-          onClick={handleOpenCreate}
-          className="px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5 shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Setup Project</span>
-        </button>
+        {canManageProjects && (
+          <button
+            onClick={handleOpenCreate}
+            className="px-3.5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Setup Project</span>
+          </button>
+        )}
       </div>
 
       {/* Projects Grid */}
@@ -128,18 +165,20 @@ export const ProjectsPage: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleOpenEdit(project)}
-                      className="p-1 text-slate-400 hover:text-slate-800 rounded-xs hover:bg-slate-100"
-                      title="Edit Project"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    {canDeleteRecords && (
+                    {canManageProjects && (
+                      <button
+                        onClick={() => handleOpenEdit(project)}
+                        className="p-1 text-slate-400 hover:text-slate-800 rounded-xs hover:bg-slate-100"
+                        title="Edit Project"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {canDeleteProjects && (
                       <button
                         onClick={() => setDeleteModalProject(project)}
                         className="p-1 text-slate-400 hover:text-rose-600 rounded-xs hover:bg-rose-50"
-                        title="Delete Project"
+                        title="Delete Project (Super Manager Only)"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -228,11 +267,18 @@ export const ProjectsPage: React.FC = () => {
       {isFormOpen && editingProject && (
         <Modal
           isOpen={isFormOpen}
-          onClose={() => setIsFormOpen(false)}
+          onClose={handleCloseForm}
           title={editingProject.id ? 'Edit Setup Project' : 'Create Branch Setup Project'}
           subtitle="Establish budgets, target handover dates, and milestones"
         >
           <form onSubmit={handleSave} className="space-y-4">
+            {submitError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <div className="flex-1 font-medium leading-relaxed">{submitError}</div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -368,16 +414,25 @@ export const ProjectsPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setIsFormOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md"
+                disabled={isSubmitting}
+                onClick={handleCloseForm}
+                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md"
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                {editingProject.id ? 'Save Project' : 'Create Project'}
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>
+                  {isSubmitting
+                    ? 'Saving...'
+                    : editingProject.id
+                    ? 'Save Project'
+                    : 'Create Project'}
+                </span>
               </button>
             </div>
           </form>

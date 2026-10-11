@@ -28,10 +28,21 @@ export const INITIAL_SETTINGS: SystemSettings = {
 
 export const INITIAL_USERS: User[] = [
   {
+    id: "usr-masteradmin",
+    name: "Muhammad Khurram",
+    email: "muhammadkhurram@gmail.com",
+    role: "super_manager",
+    isMasterAdmin: true,
+    assignedBranchIds: ["all"],
+    phone: "+92 300 1234567",
+    status: "active",
+    createdAt: "2026-01-01T08:00:00.000Z"
+  },
+  {
     id: "usr-superadmin",
     name: "Muhammad Khurram (Director Operations)",
     email: "admin@restosetup.com",
-    role: "super_admin",
+    role: "super_manager",
     assignedBranchIds: ["all"],
     phone: "+92 300 1234567",
     status: "active",
@@ -41,7 +52,7 @@ export const INITIAL_USERS: User[] = [
     id: "usr-manager1",
     name: "Tariq Mehmood (Project Manager)",
     email: "manager@restosetup.com",
-    role: "admin",
+    role: "manager",
     assignedBranchIds: ["br-khi-01", "br-lhr-02"],
     phone: "+92 321 9876543",
     status: "active",

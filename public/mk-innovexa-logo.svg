@@ -1,12 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" fill="none">
-  <!-- Monogram Box -->
-  <rect x="4" y="8" width="44" height="44" rx="10" fill="#0f172a"/>
-  <rect x="5" y="9" width="42" height="42" rx="9" stroke="#10b981" stroke-opacity="0.4" stroke-width="1.5"/>
-  <path d="M15 38V22L21 30L27 22V38" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M30 22V38M38 22L30 30L39 38" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="40" cy="20" r="2" fill="#10b981"/>
-  
-  <!-- Typography -->
-  <text x="58" y="32" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="19" font-weight="800" fill="#0f172a" letter-spacing="-0.5">MK INNOVEXA</text>
-  <text x="59" y="44" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="9" font-weight="600" fill="#64748b" letter-spacing="1.2">ENTERPRISE SOLUTIONS</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 160" fill="none">
+  <defs>
+    <!-- Teal to Emerald Gradient for 'm' -->
+    <linearGradient id="mkTealEmerald" x1="20" y1="20" x2="160" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0284C7"/>
+      <stop offset="25%" stop-color="#06B6D4"/>
+      <stop offset="65%" stop-color="#0D9488"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+
+    <!-- Emerald to Lime/Spring Green Gradient for 'k' -->
+    <linearGradient id="mkEmeraldLime" x1="160" y1="20" x2="260" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="60%" stop-color="#22C55E"/>
+      <stop offset="100%" stop-color="#4ADE80"/>
+    </linearGradient>
+
+    <!-- Gradient for Tagline -->
+    <linearGradient id="mkTagline" x1="30" y1="130" x2="370" y2="130" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0284C7"/>
+      <stop offset="35%" stop-color="#0D9488"/>
+      <stop offset="70%" stop-color="#16A34A"/>
+      <stop offset="100%" stop-color="#22C55E"/>
+    </linearGradient>
+
+    <!-- Subtle Mask for Organic Silhouettes in 'm' and 'k' -->
+    <linearGradient id="silhouetteFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Group: Stylized 'mk' Monogram -->
+  <g id="mk-monogram">
+    <!-- Letter 'm' with smooth organic rounded arches -->
+    <path d="M 32 108 L 32 38 C 32 30 38 24 46 24 C 54 24 60 30 60 38 L 60 48 C 66 32 76 24 90 24 C 102 24 110 32 114 44 C 120 32 130 24 144 24 C 158 24 166 34 166 48 L 166 108 C 166 112 162 116 158 116 L 140 116 C 136 116 132 112 132 108 L 132 58 C 132 50 128 44 120 44 C 112 44 108 50 108 58 L 108 108 C 108 112 104 116 100 116 L 82 116 C 78 116 74 112 74 108 L 74 58 C 74 50 70 44 62 44 C 54 44 50 50 50 58 L 50 108 C 50 112 46 116 42 116 L 24 116 C 20 116 16 112 16 108 L 16 38 C 16 28 24 20 34 20 C 38 20 42 21 46 24" fill="url(#mkTealEmerald)"/>
+
+    <!-- Fine artistic organic detail inside 'm' (subtle tropical silhouette) -->
+    <!-- Birds flying in the sky of 'm' -->
+    <path d="M 38 32 Q 41 29 44 32 Q 47 29 50 32" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.6"/>
+    <path d="M 46 38 Q 48 36 50 38 Q 52 36 54 38" stroke="#ffffff" stroke-width="1" stroke-linecap="round" fill="none" opacity="0.5"/>
+    <!-- Palm frond silhouettes near base of 'm' -->
+    <path d="M 28 106 Q 34 94 40 100 M 34 96 Q 28 92 26 86 M 35 93 Q 42 88 44 82 M 35 91 Q 38 82 34 76" stroke="#042f2e" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.45"/>
+
+    <!-- Letter 'k' with distinct stylized fluid curved branches -->
+    <g transform="translate(178, 0)">
+      <!-- Main stem of k -->
+      <path d="M 12 116 C 6 116 2 112 2 106 L 2 24 C 2 16 8 10 16 10 L 32 10 C 38 10 42 14 42 20 L 42 106 C 42 112 38 116 32 116 Z" fill="url(#mkEmeraldLime)"/>
+      <!-- Fluid upper arm of k -->
+      <path d="M 36 68 C 42 56 56 40 76 34 C 88 30 100 34 100 46 C 100 54 94 60 84 64 C 68 70 54 82 46 94 L 36 68 Z" fill="url(#mkEmeraldLime)"/>
+      <!-- Fluid lower leg of k with dynamic ground curve -->
+      <path d="M 40 82 C 48 76 60 76 72 84 L 92 104 C 98 110 104 114 112 114 C 114 114 116 114 116 116 L 116 118 C 116 122 112 126 106 126 C 96 126 88 120 80 112 L 62 94 C 54 86 46 86 40 90 Z" fill="url(#mkEmeraldLime)"/>
+      <!-- Mountain and gazelle silhouette detail at base of 'k' -->
+      <path d="M 68 114 L 76 102 L 84 114 Z" fill="#064e3b" opacity="0.35"/>
+      <path d="M 82 114 L 88 106 L 94 114 Z" fill="#064e3b" opacity="0.25"/>
+    </g>
+
+    <!-- Company Name alongside or integrated -->
+    <text x="306" y="60" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="28" font-weight="900" fill="#0F172A" letter-spacing="-0.5">MK</text>
+    <text x="306" y="90" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="22" font-weight="700" fill="#0D9488" letter-spacing="-0.2">INNOVEXA</text>
+  </g>
+
+  <!-- Tagline: INNOVATE. AUTOMATE. GROW. -->
+  <text x="200" y="146" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="16" font-weight="800" fill="url(#mkTagline)" letter-spacing="3.5">
+    INNOVATE. AUTOMATE. GROW.
+  </text>
 </svg>

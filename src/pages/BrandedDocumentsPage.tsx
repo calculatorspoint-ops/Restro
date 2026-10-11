@@ -20,6 +20,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
+import { useAuth } from '../context/AuthContext';
 import { BRAND } from '../config/brand';
 import {
   exportInspectionSheetPDF,
@@ -31,6 +32,7 @@ import {
 type DocTemplateType = 'inspection_sheet' | 'contractor_voucher' | 'asset_handover';
 
 export const BrandedDocumentsPage: React.FC = () => {
+  const { currentUser, isSuperManager } = useAuth();
   const {
     settings,
     branches,
@@ -40,6 +42,11 @@ export const BrandedDocumentsPage: React.FC = () => {
     constructionCosts,
     assets
   } = useData();
+
+  const hasGlobalBranchAccess = useMemo(() => {
+    if (!currentUser) return false;
+    return isSuperManager || (currentUser.assignedBranchIds && currentUser.assignedBranchIds.includes('all'));
+  }, [currentUser, isSuperManager]);
 
   const [activeTemplate, setActiveTemplate] = useState<DocTemplateType>('inspection_sheet');
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
@@ -150,7 +157,7 @@ export const BrandedDocumentsPage: React.FC = () => {
 
     try {
       if (activeTemplate === 'inspection_sheet') {
-        const doc = exportInspectionSheetPDF({
+        const doc = await exportInspectionSheetPDF({
           branch: currentBranch,
           project: currentProject,
           settings,
@@ -161,7 +168,7 @@ export const BrandedDocumentsPage: React.FC = () => {
         doc.save(`MKInnovexa_InspectionSheet_${currentBranch.code}.pdf`);
         setDownloadSuccess(`Inspection Sheet for ${currentBranch.name} exported.`);
       } else if (activeTemplate === 'contractor_voucher') {
-        const doc = exportPaymentVoucherPDF({
+        const doc = await exportPaymentVoucherPDF({
           branch: currentBranch,
           project: currentProject,
           settings,
@@ -174,7 +181,7 @@ export const BrandedDocumentsPage: React.FC = () => {
         );
         setDownloadSuccess(`Payment Voucher for ${activeCostItem.vendorContractor} exported.`);
       } else {
-        const doc = exportAssetHandoverPDF({
+        const doc = await exportAssetHandoverPDF({
           branch: currentBranch,
           project: currentProject,
           settings,
@@ -230,7 +237,9 @@ export const BrandedDocumentsPage: React.FC = () => {
               onChange={(e) => setSelectedBranchId(e.target.value)}
               className="pl-3 pr-8 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg shadow-xs appearance-none focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
             >
-              <option value="all">All Branches (Default: {branches[0]?.code})</option>
+              {hasGlobalBranchAccess && (
+                <option value="all">All Branches (Default: {branches[0]?.code})</option>
+              )}
               {branches.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.code} - {b.name}
@@ -253,7 +262,7 @@ export const BrandedDocumentsPage: React.FC = () => {
             type="button"
             onClick={handleDownloadPDF}
             disabled={isGenerating}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 rounded-lg shadow-xs transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 rounded-lg shadow-xs transition-colors"
           >
             <Download className="w-4 h-4 text-emerald-400" />
             <span>{isGenerating ? 'Generating PDF...' : 'Download Branded PDF'}</span>

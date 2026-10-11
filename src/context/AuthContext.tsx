@@ -1,226 +1,311 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, UserRole } from '../types';
-import { auth, googleProvider, db } from '../firebase';
-import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { doc, setDoc } from 'firebase/firestore';
+import { User, UserRole, isSuperManagerRole, isManagerRole, isStaffRole } from '../types';
+import { authService, AuthProfile, mapAuthError } from '../services/authService';
+import { MASTER_ADMIN_UIDS } from '../utils/authorization';
+import { auth, db } from '../firebase';
+import { User as FirebaseUser } from 'firebase/auth';
 
 interface AuthContextType {
-  currentUser: User | null;
+  currentUser: AuthProfile | null;
   firebaseUser: FirebaseUser | null;
   isAuthenticated: boolean;
   authLoading: boolean;
-  login: (email: string, password?: string) => Promise<boolean>;
-  loginWithGoogle: () => Promise<boolean>;
+  login: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
+  register: (fullName: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
+  resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+  changeCurrentUserPassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  resendVerification: () => Promise<{ success: boolean; error?: string }>;
+  refreshUser: () => Promise<void>;
+  updateProfileDetails: (updates: Partial<User>) => Promise<boolean>;
+  deleteUserAccount: () => Promise<boolean>;
   switchUserRole: (role: UserRole) => void;
   canManageUsers: boolean;
+  canManageSettings: boolean;
+  canDeleteBranches: boolean;
+  canDeleteProjects: boolean;
   canManageBranches: boolean;
+  canManageProjects: boolean;
   canDeleteRecords: boolean;
   canEditBranch: (branchId?: string) => boolean;
+  isSuperManager: boolean;
+  isManager: boolean;
   isSuperAdmin: boolean;
   isAdmin: boolean;
   isStaff: boolean;
+  isMasterAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const DEMO_USERS: Record<UserRole, User> = {
-  super_admin: {
-    id: "usr-superadmin",
-    name: "Muhammad Khurram (Director Operations)",
-    email: "admin@restosetup.com",
-    role: "super_admin",
-    assignedBranchIds: ["all"],
-    phone: "+92 300 1234567",
-    status: "active",
-    createdAt: "2026-01-10T10:00:00.000Z"
-  },
-  admin: {
-    id: "usr-manager1",
-    name: "Tariq Mehmood (Project Manager)",
-    email: "manager@restosetup.com",
-    role: "admin",
-    assignedBranchIds: ["br-khi-01", "br-lhr-02"],
-    phone: "+92 321 9876543",
-    status: "active",
-    createdAt: "2026-01-15T11:00:00.000Z"
-  },
-  staff: {
-    id: "usr-staff1",
-    name: "Bilal Ahmed (Site Inventory Supervisor)",
-    email: "staff@restosetup.com",
-    role: "staff",
-    assignedBranchIds: ["br-khi-01"],
-    phone: "+92 333 4567890",
-    status: "active",
-    createdAt: "2026-02-01T09:30:00.000Z"
-  }
-};
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<AuthProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('restosetup_auth_user');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return DEMO_USERS.super_admin;
-      }
-    }
-    return DEMO_USERS.super_admin;
-  });
-
-  // Listen to Firebase Auth state
+  // Initialize persistence on boot
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+    authService.initPersistence();
+  }, []);
+
+  // Listen to authoritative Firebase Auth changes
+  useEffect(() => {
+    const unsubscribe = authService.subscribeToAuth(async (fbUser) => {
       setFirebaseUser(fbUser);
-      setAuthLoading(false);
 
       if (fbUser) {
-        const isOwner = fbUser.email?.toLowerCase() === 'muhammadkhurram682@gmail.com';
         try {
-          const userDocRef = doc(db, 'users', fbUser.uid);
-          const snap = await getDoc(userDocRef);
-          if (snap.exists()) {
-            const existing = snap.data() as User;
-            const role = isOwner ? 'super_admin' : (existing.role || 'admin');
-            const updatedUser: User = {
-              ...existing,
-              id: fbUser.uid,
-              email: fbUser.email || existing.email,
-              name: existing.name || fbUser.displayName || 'Authenticated User',
-              role
-            };
-            await setDoc(userDocRef, updatedUser, { merge: true });
-            setCurrentUser(updatedUser);
-          } else {
-            const newUser: User = {
-              id: fbUser.uid,
-              name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Authenticated User',
-              email: fbUser.email || '',
-              role: isOwner ? 'super_admin' : 'admin',
-              assignedBranchIds: ['all'],
-              phone: fbUser.phoneNumber || '',
-              status: 'active',
-              createdAt: new Date().toISOString()
-            };
-            await setDoc(userDocRef, newUser, { merge: true });
-            setCurrentUser(newUser);
-          }
+          const profile = await authService.getOrCreateUserProfile(fbUser);
+          setCurrentUser(profile);
         } catch (err) {
-          console.warn('Sync user document in Firestore:', err);
-          const fallbackUser: User = {
+          console.warn('Error syncing profile from Firestore:', err);
+          const isOwner = fbUser.email?.toLowerCase() === 'muhammadkhurram682@gmail.com';
+          setCurrentUser({
             id: fbUser.uid,
-            name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Authenticated User',
+            name: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
             email: fbUser.email || '',
             role: isOwner ? 'super_admin' : 'admin',
             assignedBranchIds: ['all'],
-            phone: fbUser.phoneNumber || '',
+            phone: '',
             status: 'active',
-            createdAt: new Date().toISOString()
-          };
-          setCurrentUser(fallbackUser);
+            createdAt: new Date().toISOString(),
+            emailVerified: fbUser.emailVerified
+          });
         }
+      } else {
+        setCurrentUser(null);
       }
+      setAuthLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('restosetup_auth_user', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('restosetup_auth_user');
-    }
-  }, [currentUser]);
-
-  const loginWithGoogle = async (): Promise<boolean> => {
+  // Login handler
+  const login = async (email: string, password = ''): Promise<{ success: boolean; error?: string }> => {
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      if (result.user) {
-        return true;
-      }
-    } catch (err) {
-      console.warn('Google sign in error or popup closed:', err);
+      const { profile } = await authService.loginUser(email, password);
+      setCurrentUser(profile);
+      return { success: true };
+    } catch (err: any) {
+      const friendlyMsg = mapAuthError(err);
+      return { success: false, error: friendlyMsg };
     }
-    return false;
   };
 
-  const login = async (email: string, password = ''): Promise<boolean> => {
+  // Register handler
+  const register = async (
+    fullName: string,
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCurrentUser(data.user);
-        return true;
-      }
-    } catch {
-      // Fallback matching demo credentials
-      const match = Object.values(DEMO_USERS).find((u) => u.email.toLowerCase() === email.toLowerCase());
-      if (match) {
-        setCurrentUser(match);
-        return true;
-      }
+      const { profile } = await authService.registerUser(fullName, email, password);
+      setCurrentUser(profile);
+      return { success: true };
+    } catch (err: any) {
+      const friendlyMsg = mapAuthError(err);
+      return { success: false, error: friendlyMsg };
     }
-    return false;
   };
 
+  // Google Login handler
+  const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { profile } = await authService.loginWithGoogle();
+      setCurrentUser(profile);
+      return { success: true };
+    } catch (err: any) {
+      const friendlyMsg = mapAuthError(err);
+      return { success: false, error: friendlyMsg };
+    }
+  };
+
+  // Logout handler
   const logout = async () => {
     try {
-      await signOut(auth);
+      await authService.logoutUser();
     } catch (err) {
-      console.warn('Firebase sign out error:', err);
+      console.warn('Error signing out:', err);
     }
     setCurrentUser(null);
     setFirebaseUser(null);
   };
 
-  const switchUserRole = (role: UserRole) => {
-    setCurrentUser(DEMO_USERS[role] || DEMO_USERS.super_admin);
+  // Password reset
+  const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await authService.sendPasswordReset(email);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: mapAuthError(err) };
+    }
   };
 
-  const isSuperAdmin = currentUser?.role === 'super_admin';
-  const isAdmin = currentUser?.role === 'admin';
-  const isStaff = currentUser?.role === 'staff';
+  // Change current user password
+  const changeCurrentUserPassword = async (newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await authService.updateCurrentUserPassword(newPassword);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: mapAuthError(err) };
+    }
+  };
 
-  const canManageUsers = isSuperAdmin;
-  const canManageBranches = isSuperAdmin;
-  const canDeleteRecords = isSuperAdmin || isAdmin;
+  // Resend email verification
+  const resendVerification = async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await authService.sendVerificationEmail();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: mapAuthError(err) };
+    }
+  };
 
-  const canEditBranch = (branchId?: string) => {
+  // Reload user state
+  const refreshUser = async () => {
+    const refreshed = await authService.reloadCurrentUser();
+    if (refreshed) {
+      setFirebaseUser(refreshed);
+      const profile = await authService.getOrCreateUserProfile(refreshed);
+      setCurrentUser(profile);
+    }
+  };
+
+  // Update profile
+  const updateProfileDetails = async (updates: Partial<User>): Promise<boolean> => {
     if (!currentUser) return false;
-    if (isSuperAdmin) return true;
-    if (!branchId) return true;
-    if (currentUser.assignedBranchIds.includes('all')) return true;
-    return currentUser.assignedBranchIds.includes(branchId);
+    try {
+      await authService.updateProfileDetails(currentUser.id, updates);
+      setCurrentUser((prev) => (prev ? { ...prev, ...updates } : null));
+      return true;
+    } catch (err) {
+      console.error('Failed to update profile:', err);
+      return false;
+    }
   };
+
+  // Delete account
+  const deleteUserAccount = async (): Promise<boolean> => {
+    if (!currentUser) return false;
+    try {
+      await authService.deleteAccount(currentUser.id);
+      setCurrentUser(null);
+      setFirebaseUser(null);
+      return true;
+    } catch (err) {
+      console.error('Failed to delete account:', err);
+      return false;
+    }
+  };
+
+  // Testing role switch: updates state and syncs to Firestore profile (Super Managers only)
+  const switchUserRole = async (role: UserRole) => {
+    if (!currentUser) return;
+    const callerIsSuper =
+      currentUser.isMasterAdmin === true ||
+      isSuperManagerRole(currentUser.role) ||
+      ['muhammadkhurram@gmail.com', 'muhammadkhurram682@gmail.com'].includes(currentUser.email?.toLowerCase().trim() || '');
+
+    if (!callerIsSuper) {
+      console.warn('Unauthorized role switch attempt rejected.');
+      return;
+    }
+
+    setCurrentUser((prev) => (prev ? { ...prev, role } : null));
+
+    if (firebaseUser) {
+      try {
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        await setDoc(userDocRef, { role, updatedAt: new Date().toISOString() }, { merge: true });
+      } catch (err) {
+        console.warn('Could not persist simulated role to Firestore doc:', err);
+      }
+    }
+  };
+
+  // Permissions & Roles Resolution
+  const isMasterAdmin =
+    currentUser?.isMasterAdmin === true ||
+    (!!currentUser?.id && MASTER_ADMIN_UIDS.includes(currentUser.id)) ||
+    (!!firebaseUser?.uid && MASTER_ADMIN_UIDS.includes(firebaseUser.uid)) ||
+    currentUser?.email?.toLowerCase().trim() === 'muhammadkhurram@gmail.com' ||
+    currentUser?.email?.toLowerCase().trim() === 'muhammadkhurram682@gmail.com' ||
+    firebaseUser?.email?.toLowerCase().trim() === 'muhammadkhurram@gmail.com' ||
+    firebaseUser?.email?.toLowerCase().trim() === 'muhammadkhurram682@gmail.com';
+
+  const isOwnerEmail =
+    isMasterAdmin ||
+    currentUser?.email?.toLowerCase() === 'admin@restosetup.com';
+  const isManagerEmail = currentUser?.email?.toLowerCase() === 'manager@restosetup.com';
+
+  const isSuperManager =
+    isMasterAdmin ||
+    isSuperManagerRole(currentUser?.role) ||
+    (isOwnerEmail && currentUser?.role !== 'staff' && currentUser?.role !== 'manager');
+  const isManager =
+    isManagerRole(currentUser?.role) ||
+    isSuperManager ||
+    (isManagerEmail && currentUser?.role !== 'staff');
+  const isStaff = isStaffRole(currentUser?.role) && !isSuperManager && !isManager;
+
+  // Compatibility aliases
+  const isSuperAdmin = isSuperManager;
+  const isAdmin = isManager;
+
+  // Granular capability flags strictly matching the enterprise role hierarchy
+  const canManageUsers = isSuperManager;
+  const canManageSettings = isSuperManager;
+  const canDeleteBranches = isSuperManager;
+  const canDeleteProjects = isSuperManager;
+
+  const canManageBranches = isManager;
+  const canManageProjects = isManager;
+  const canDeleteRecords = isManager; // Staff CANNOT delete records
+
+  const canEditBranch = useCallback((branchId?: string) => {
+    if (!currentUser) return false;
+    if (isSuperManager) return true;
+    if (!isManager) return false; // Staff cannot edit branch configs
+    if (!branchId) return true;
+    if (currentUser.assignedBranchIds?.includes('all')) return true;
+    return currentUser.assignedBranchIds?.includes(branchId) || false;
+  }, [currentUser, isSuperManager, isManager]);
 
   return (
     <AuthContext.Provider
       value={{
         currentUser,
         firebaseUser,
-        isAuthenticated: !!currentUser,
+        isAuthenticated: !!firebaseUser && !!currentUser,
         authLoading,
         login,
+        register,
         loginWithGoogle,
         logout,
+        resetPassword,
+        changeCurrentUserPassword,
+        resendVerification,
+        refreshUser,
+        updateProfileDetails,
+        deleteUserAccount,
         switchUserRole,
         canManageUsers,
+        canManageSettings,
+        canDeleteBranches,
+        canDeleteProjects,
         canManageBranches,
+        canManageProjects,
         canDeleteRecords,
         canEditBranch,
+        isSuperManager,
+        isManager,
         isSuperAdmin,
         isAdmin,
-        isStaff
+        isStaff,
+        isMasterAdmin
       }}
     >
       {children}

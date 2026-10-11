@@ -1,17 +1,21 @@
-import * as XLSX from 'xlsx';
+// Lazy-load xlsx on demand to minimize initial JavaScript bundle size
+const getXLSX = async () => {
+  return await import('xlsx');
+};
 
-export function exportToExcel(data: any[], fileName: string, sheetName = 'Sheet1') {
+export async function exportToExcel(data: any[], fileName: string, sheetName = 'Sheet1') {
   if (!data || data.length === 0) {
-    alert('No data available to export.');
     return;
   }
+  const XLSX = await getXLSX();
   const worksheet = XLSX.utils.json_to_sheet(data);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   XLSX.writeFile(workbook, `${fileName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-export function parseExcelFile(file: File): Promise<{ headers: string[]; rows: any[] }> {
+export async function parseExcelFile(file: File): Promise<{ headers: string[]; rows: any[] }> {
+  const XLSX = await getXLSX();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -260,9 +264,10 @@ export const EXCEL_TEMPLATES: Record<string, { name: string; filename: string; c
   }
 };
 
-export function downloadTemplate(templateKey: string) {
+export async function downloadTemplate(templateKey: string) {
   const config = EXCEL_TEMPLATES[templateKey];
   if (!config) return;
+  const XLSX = await getXLSX();
   const worksheet = XLSX.utils.json_to_sheet([config.sampleRow], { header: config.columns });
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');

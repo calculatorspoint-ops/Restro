@@ -42,7 +42,7 @@ const getEnvVar = (key: string, fallback: string): string => {
 };
 
 const companyName = getEnvVar('VITE_COMPANY_NAME', 'MK Innovexa');
-const productName = getEnvVar('VITE_APP_NAME', 'RestoSetup ERP');
+const productName = getEnvVar('VITE_APP_NAME', 'RestoSetup - Restaurant Branch Setup, Costing & Asset ERP');
 
 export const BRAND: BrandConfig = {
   companyName,
@@ -51,11 +51,11 @@ export const BRAND: BrandConfig = {
   companyTagline: 'Engineering Next-Gen Commercial Systems & Enterprise ERPs',
   productName,
   productShortName: 'RestoSetup',
-  productTagline: 'Restaurant Branch Setup, Costing & Asset Management ERP',
+  productTagline: 'Restaurant Branch Setup, Costing & Asset ERP',
   productDescription: 'Enterprise Restaurant Branch Setup, Construction Costing, Equipment Inventory and Asset Management System.',
   copyrightYear: 2026,
   copyrightNotice: `© 2026 ${companyName}. All rights reserved.`,
-  poweredByNotice: `Powered by ${companyName}`,
+  poweredByNotice: `Developed by ${companyName}`,
   supportEmail: 'support@mkinnovexa.com',
   version: 'v2.4.0-enterprise',
   browserTitle: `${productName} — ${companyName}`

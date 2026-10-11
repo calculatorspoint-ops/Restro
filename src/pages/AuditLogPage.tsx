@@ -11,11 +11,13 @@ export const AuditLogPage: React.FC = () => {
   const [moduleFilter, setModuleFilter] = useState('all');
 
   const displayedLogs = useMemo(() => {
+    const term = (searchTerm || '').toLowerCase();
     return auditLogs.filter((log) => {
+      if (!log) return false;
       const matchesSearch =
-        log.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        log.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        log.recordId.toLowerCase().includes(searchTerm.toLowerCase());
+        String(log.userName || '').toLowerCase().includes(term) ||
+        String(log.summary || '').toLowerCase().includes(term) ||
+        String(log.recordId || '').toLowerCase().includes(term);
 
       const matchesAction = actionFilter === 'all' || log.action === actionFilter;
       const matchesModule = moduleFilter === 'all' || log.module === moduleFilter;

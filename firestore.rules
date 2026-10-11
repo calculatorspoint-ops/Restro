@@ -2,136 +2,472 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for Authentication and Role-Based Access Control (RBAC)
+    // =========================================================================
+    // Core Authentication & Role-Based Identity Helpers
+    // =========================================================================
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null && request.auth.uid != null;
     }
 
+    function isMasterAdmin() {
+      return isAuthenticated() && (
+        request.auth.uid == 'lVNGCaPfb7hExlXRR8b7VMw9X4A2' ||
+        (('email' in request.auth.token) && (
+          request.auth.token.email.lower() == 'muhammadkhurram@gmail.com' ||
+          request.auth.token.email.lower() == 'muhammadkhurram682@gmail.com'
+        )) ||
+        (hasUserDoc() && getUserDoc() != null && ('isMasterAdmin' in getUserDoc()) && getUserDoc().isMasterAdmin == true)
+      );
+    }
+
+    function isSuperAdminEmail() {
+      return request.auth.uid == 'lVNGCaPfb7hExlXRR8b7VMw9X4A2' || (
+        ('email' in request.auth.token) && (
+          request.auth.token.email.lower() == 'muhammadkhurram@gmail.com' ||
+          request.auth.token.email.lower() == 'muhammadkhurram682@gmail.com' ||
+          request.auth.token.email.lower() == 'admin@restosetup.com'
+        )
+      );
+    }
+
+    function isManagerEmail() {
+      return ('email' in request.auth.token) && (
+        request.auth.token.email.lower() == 'manager@restosetup.com'
+      );
+    }
+
+    // Role Resolution from Auth Token, User Profile Document, or Primary Owner Emails
     function hasUserDoc() {
-      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
     function getUserDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return hasUserDoc() ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : null;
     }
 
-    function isSuperAdmin() {
+    function getUserRole() {
+      let u = getUserDoc();
+      return u != null && ('role' in u) ? u.role : '';
+    }
+
+    // Check if the user's account is active (inactive accounts are blocked from business operations)
+    function isAccountActive() {
+      return isMasterAdmin() || isSuperAdminEmail() || !hasUserDoc() ||
+        (getUserDoc() != null && (!('status' in getUserDoc()) || getUserDoc().status == 'active'));
+    }
+
+    function isSuperManager() {
       return isAuthenticated() && (
-        (request.auth.token.email != null && request.auth.token.email.lower() == 'muhammadkhurram682@gmail.com') ||
-        (request.auth.token.role != null && (request.auth.token.role == 'super_admin' || request.auth.token.role == 'Super Admin')) ||
-        (hasUserDoc() && (getUserDoc().role == 'super_admin' || getUserDoc().role == 'Super Admin'))
+        isMasterAdmin() ||
+        isSuperAdminEmail() ||
+        (isAccountActive() && (
+          (('role' in request.auth.token) && (
+            request.auth.token.role == 'super_manager' ||
+            request.auth.token.role == 'super_admin' ||
+            request.auth.token.role == 'Super Manager' ||
+            request.auth.token.role == 'Super Admin'
+          )) ||
+          (hasUserDoc() && (
+            getUserRole() == 'super_manager' ||
+            getUserRole() == 'super_admin' ||
+            getUserRole() == 'Super Manager' ||
+            getUserRole() == 'Super Admin'
+          ))
+        ))
       );
     }
 
-    function isAdmin() {
+    function isManager() {
       return isAuthenticated() && (
-        isSuperAdmin() ||
-        (request.auth.token.role != null && (request.auth.token.role == 'admin' || request.auth.token.role == 'Admin')) ||
-        (hasUserDoc() && (getUserDoc().role == 'admin' || getUserDoc().role == 'Admin'))
+        isSuperManager() ||
+        (isAccountActive() && (
+          isManagerEmail() ||
+          (('role' in request.auth.token) && (
+            request.auth.token.role == 'manager' ||
+            request.auth.token.role == 'admin' ||
+            request.auth.token.role == 'Manager' ||
+            request.auth.token.role == 'Admin'
+          )) ||
+          (hasUserDoc() && (
+            getUserRole() == 'manager' ||
+            getUserRole() == 'admin' ||
+            getUserRole() == 'Manager' ||
+            getUserRole() == 'Admin'
+          ))
+        ))
       );
     }
 
-    // Connection probe for initial boot health check
+    function isStaff() {
+      return isAuthenticated() && isAccountActive();
+    }
+
+    // =========================================================================
+    // Branch Authorization Helpers (Enforces assignedBranchIds in Firestore)
+    // =========================================================================
+    function hasGlobalBranchAccess() {
+      return isMasterAdmin() || isSuperManager() ||
+        (hasUserDoc() && getUserDoc() != null && ('assignedBranchIds' in getUserDoc()) && getUserDoc().assignedBranchIds.hasAny(['all']));
+    }
+
+    function isBranchPermitted(branchId) {
+      return isAuthenticated() && isAccountActive() && (
+        isMasterAdmin() ||
+        hasGlobalBranchAccess() ||
+        (branchId != null && hasUserDoc() && getUserDoc() != null && ('assignedBranchIds' in getUserDoc()) && getUserDoc().assignedBranchIds.hasAny([branchId]))
+      );
+    }
+
+    // Existing document branch authorization
+    function canAccessDocBranch(data) {
+      return isMasterAdmin() || hasGlobalBranchAccess() ||
+        (data != null && ('branchId' in data) && data.branchId != null && isBranchPermitted(data.branchId));
+    }
+
+    // Incoming document branch authorization (strictly requires assigned branchId)
+    function canWriteDocBranch(incomingData) {
+      return isMasterAdmin() || hasGlobalBranchAccess() ||
+        (incomingData != null && ('branchId' in incomingData) && incomingData.branchId != null && isBranchPermitted(incomingData.branchId));
+    }
+
+    // Update branch authorization: prevents transferring a document to an unassigned branch
+    function canUpdateDocBranch(existingData, incomingData) {
+      return canAccessDocBranch(existingData) && canWriteDocBranch(incomingData);
+    }
+
+    // Recipe branch availability authorization
+    function canAccessRecipeBranch(data) {
+      return hasGlobalBranchAccess() ||
+        (data == null ||
+         !('branchAvailability' in data) ||
+         data.branchAvailability.hasAny(['all']) ||
+         (hasUserDoc() && getUserDoc() != null && ('assignedBranchIds' in getUserDoc()) && getUserDoc().assignedBranchIds.hasAny(data.branchAvailability)));
+    }
+
+    // Granular Module Permission Checks (enforces permissions.{module}.{action})
+    function canModuleAction(moduleName, actionName, defaultRoleAllowed) {
+      return isMasterAdmin() || isSuperManager() || (
+        hasUserDoc() && getUserDoc() != null && ('permissions' in getUserDoc()) && (moduleName in getUserDoc().permissions) && (actionName in getUserDoc().permissions[moduleName])
+          ? getUserDoc().permissions[moduleName][actionName] == true
+          : defaultRoleAllowed
+      );
+    }
+
+    // =========================================================================
+    // Diagnostic Probe for SDK Boot Connection Check
+    // =========================================================================
     match /test/connection {
       allow read: if true;
       allow write: if false;
     }
 
-    // System-wide Settings: readable by app users, strictly restricted to Super Admin for write/modify
+    // =========================================================================
+    // System Settings (Branding, Currency, Tax Rate, Alert Thresholds)
+    // Only Super Manager can modify corporate system settings.
+    // =========================================================================
     match /settings/{settingId} {
-      allow read: if true;
-      allow create, update, delete: if isSuperAdmin();
+      allow read: if isAuthenticated() && isAccountActive();
+      allow create, update, delete: if isSuperManager();
     }
 
+    // =========================================================================
     // User Directory & Profile Documents
+    // Enforces:
+    // 1. Password fields are STRICTLY PROHIBITED in Firestore user documents
+    // 2. Master Admin has absolute control; Master Admin account is permanently locked & protected
+    // 3. Super Manager can manage staff & managers, but CANNOT demote or delete Master Admin
+    // 4. Regular users CANNOT self-promote or modify role/status/branches/permissions/isMasterAdmin
+    // =========================================================================
     match /users/{userId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow delete: if isSuperAdmin();
+      allow read: if isAuthenticated() && isAccountActive();
+      
+      allow create: if isAuthenticated() && !('password' in request.resource.data) && (
+        isMasterAdmin() ||
+        (isSuperManager() && (!('isMasterAdmin' in request.resource.data) || request.resource.data.isMasterAdmin != true)) ||
+        (request.auth.uid == userId && isSuperAdminEmail()) ||
+        (request.auth.uid == userId && (
+          (!('isMasterAdmin' in request.resource.data) || request.resource.data.isMasterAdmin != true) &&
+          (!('role' in request.resource.data) || request.resource.data.role == 'staff' ||
+           (isManagerEmail() && request.resource.data.role in ['manager', 'admin', 'staff']))
+        ))
+      );
+
+      allow update: if isAuthenticated() && !('password' in request.resource.data) && (
+        // Master Admin can update users; if updating Master Admin doc, it stays super_manager, active & isMasterAdmin=true
+        (isMasterAdmin() && (
+          (!('isMasterAdmin' in resource.data) || resource.data.isMasterAdmin != true) ||
+          (request.resource.data.isMasterAdmin == true && request.resource.data.role in ['super_manager', 'super_admin', 'Super Manager', 'Super Admin'] && request.resource.data.status == 'active')
+        )) ||
+        // Super Manager (non-master) can update users, but CANNOT modify or demote Master Admin, and CANNOT grant isMasterAdmin
+        (isSuperManager() && !isMasterAdmin() && (
+          (!('isMasterAdmin' in resource.data) || resource.data.isMasterAdmin != true) &&
+          (!('email' in resource.data) || (
+            resource.data.email.lower() != 'muhammadkhurram@gmail.com' &&
+            resource.data.email.lower() != 'muhammadkhurram682@gmail.com' &&
+            resource.data.email.lower() != 'admin@restosetup.com'
+          )) &&
+          (!('isMasterAdmin' in request.resource.data) || request.resource.data.isMasterAdmin != true) &&
+          (!('role' in request.resource.data) || request.resource.data.role in ['manager', 'admin', 'staff'])
+        )) ||
+        // Self profile update for regular users: ONLY personal contact details, CANNOT touch role, status, permissions, isMasterAdmin, or assignedBranchIds
+        (request.auth.uid == userId && (
+          (!('isMasterAdmin' in request.resource.data) || request.resource.data.isMasterAdmin == resource.data.isMasterAdmin) &&
+          (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+          (!('status' in request.resource.data) || request.resource.data.status == resource.data.status) &&
+          (!('assignedBranchIds' in request.resource.data) || request.resource.data.assignedBranchIds == resource.data.assignedBranchIds) &&
+          (!('permissions' in request.resource.data) || request.resource.data.permissions == resource.data.permissions)
+        ))
+      );
+
+      // Master Admin can NEVER be deleted!
+      allow delete: if isAuthenticated() && isSuperManager() && (
+        (!('isMasterAdmin' in resource.data) || resource.data.isMasterAdmin != true) &&
+        (!('email' in resource.data) || (
+          resource.data.email.lower() != 'muhammadkhurram@gmail.com' &&
+          resource.data.email.lower() != 'muhammadkhurram682@gmail.com' &&
+          resource.data.email.lower() != 'admin@restosetup.com'
+        ))
+      );
+
+      // =======================================================================
+      // User-scoped subcollections (/users/{userId}/{userCollection}/{docId})
+      // Used by UID-scoped operational tenancy
+      // =======================================================================
+      match /branches/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (
+          isSuperManager() ||
+          (request.auth.uid == userId && isBranchPermitted(docId))
+        );
+        allow create, update: if isAuthenticated() && isAccountActive() && isManager() && (
+          isSuperManager() ||
+          (request.auth.uid == userId && isBranchPermitted(docId))
+        );
+        allow delete: if isAuthenticated() && isAccountActive() && isSuperManager();
+      }
+
+      match /projects/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+        allow delete: if isAuthenticated() && isAccountActive() && isSuperManager() && canAccessDocBranch(resource.data);
+      }
+
+      match /settings/{docId} {
+        allow read: if isAuthenticated() && isAccountActive();
+        allow create, update, delete: if isSuperManager();
+      }
+
+      match /assets/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+        allow delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+      }
+
+      match /constructionCosts/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+        allow delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+      }
+
+      match /purchases/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+        allow delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+      }
+
+      match /suppliers/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager());
+        allow create, update, delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager());
+      }
+
+      match /recipes/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessRecipeBranch(resource.data);
+        allow create, update, delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager());
+      }
+
+      match /locations/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+        allow delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+      }
+
+      match /inventory/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+        allow delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+      }
+
+      match /expenses/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+        allow delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+      }
+
+      match /stockTransactions/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update, delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+      }
+
+      match /documents/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+        allow create: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canWriteDocBranch(request.resource.data);
+        allow update: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+        allow delete: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager()) && canAccessDocBranch(resource.data);
+      }
+
+      match /auditLogs/{docId} {
+        allow read: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager());
+        allow create: if isAuthenticated() && isAccountActive();
+        allow update, delete: if false;
+      }
+
+      match /{allUserCollections=**} {
+        allow read: if isAuthenticated() && isAccountActive() && (request.auth.uid == userId || isSuperManager());
+        allow write: if isAuthenticated() && isAccountActive() && isManager() && (request.auth.uid == userId || isSuperManager());
+      }
     }
 
-    // Restaurant Branches
+    // =========================================================================
+    // Restaurant Branches: Super Manager full, Manager edit assigned, Staff view assigned
+    // =========================================================================
     match /branches/{branchId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && (
+        hasGlobalBranchAccess() ||
+        (canModuleAction('branches', 'view', true) && isBranchPermitted(branchId))
+      );
+      allow create, update: if isAuthenticated() && isAccountActive() && (
+        hasGlobalBranchAccess() ||
+        (canModuleAction('branches', 'edit', isManager()) && isBranchPermitted(branchId))
+      );
+      allow delete: if isAuthenticated() && isAccountActive() && (isMasterAdmin() || isSuperManager());
     }
 
-    // Branch Fit-out & Launch Projects
+    // =========================================================================
+    // Branch Fit-Out Projects: Super Manager full, Manager edit assigned, Staff view assigned
+    // =========================================================================
     match /projects/{projectId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('projects', 'view', true) && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canModuleAction('projects', 'create', isManager()) && canWriteDocBranch(request.resource.data);
+      allow update: if isAuthenticated() && isAccountActive() && canModuleAction('projects', 'edit', isManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+      allow delete: if isAuthenticated() && isAccountActive() && canModuleAction('projects', 'delete', isSuperManager()) && canAccessDocBranch(resource.data);
     }
 
-    // Physical Assets (Electrical, Kitchen, HVAC, POS, Furniture)
+    // =========================================================================
+    // Physical Assets (Kitchen, HVAC, Electrical, IT, POS, Furniture, General)
+    // =========================================================================
     match /assets/{assetId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('assets', 'view', true) && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canModuleAction('assets', 'create', isManager()) && canWriteDocBranch(request.resource.data);
+      allow update: if isAuthenticated() && isAccountActive() && canModuleAction('assets', 'edit', isManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+      allow delete: if isAuthenticated() && isAccountActive() && canModuleAction('assets', 'delete', isManager()) && canAccessDocBranch(resource.data);
     }
 
+    // =========================================================================
     // Construction Milestones & Civil Costing
+    // =========================================================================
     match /constructionCosts/{costId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('construction', 'view', true) && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canModuleAction('construction', 'create', isManager()) && canWriteDocBranch(request.resource.data);
+      allow update: if isAuthenticated() && isAccountActive() && canModuleAction('construction', 'edit', isManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+      allow delete: if isAuthenticated() && isAccountActive() && canModuleAction('construction', 'delete', isManager()) && canAccessDocBranch(resource.data);
     }
 
+    // =========================================================================
     // Raw Material & Consumables Inventory SKUs
+    // Staff can view and update stock quantities, only Manager/Super Manager can delete
+    // =========================================================================
     match /inventory/{itemId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('inventory', 'view', true) && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canModuleAction('inventory', 'create', true) && canWriteDocBranch(request.resource.data);
+      allow update: if isAuthenticated() && isAccountActive() && canModuleAction('inventory', 'edit', true) && canUpdateDocBranch(resource.data, request.resource.data);
+      allow delete: if isAuthenticated() && isAccountActive() && canModuleAction('inventory', 'delete', isManager()) && canAccessDocBranch(resource.data);
     }
 
+    // =========================================================================
     // Recipe & Culinary Menu Costing (COGS)
+    // =========================================================================
     match /recipes/{recipeId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('recipes', 'view', true) && canAccessRecipeBranch(resource.data);
+      allow create, update, delete: if isAuthenticated() && isAccountActive() && canModuleAction('recipes', 'edit', isManager());
     }
 
-    // Stock Transactions & Consumption Records
+    // =========================================================================
+    // Stock Movement Transactions (Immutable history)
+    // =========================================================================
     match /stockTransactions/{txnId} {
-      allow read: if true;
-      allow create: if isAuthenticated();
-      allow update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canWriteDocBranch(request.resource.data);
+      allow update, delete: if isAuthenticated() && isAccountActive() && isManager() && canAccessDocBranch(resource.data);
     }
 
+    // =========================================================================
     // Purchase Orders & Invoices
+    // =========================================================================
     match /purchases/{purchaseId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('purchases', 'view', true) && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canModuleAction('purchases', 'create', isManager()) && canWriteDocBranch(request.resource.data);
+      allow update: if isAuthenticated() && isAccountActive() && canModuleAction('purchases', 'edit', isManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+      allow delete: if isAuthenticated() && isAccountActive() && canModuleAction('purchases', 'delete', isManager()) && canAccessDocBranch(resource.data);
     }
 
-    // Suppliers & Contractor Vendors
+    // =========================================================================
+    // Suppliers & Contractor Directory
+    // =========================================================================
     match /suppliers/{supplierId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('suppliers', 'view', true);
+      allow create, update, delete: if isAuthenticated() && isAccountActive() && canModuleAction('suppliers', 'edit', isManager());
     }
 
-    // Operational Expenses
+    // =========================================================================
+    // Operational Expense Vouchers
+    // Staff can record expense vouchers; deletion requires Manager or Super Manager
+    // =========================================================================
     match /expenses/{expenseId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('expenses', 'view', true) && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canModuleAction('expenses', 'create', true) && canWriteDocBranch(request.resource.data);
+      allow update: if isAuthenticated() && isAccountActive() && canModuleAction('expenses', 'edit', isManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+      allow delete: if isAuthenticated() && isAccountActive() && canModuleAction('expenses', 'delete', isManager()) && canAccessDocBranch(resource.data);
     }
 
+    // =========================================================================
     // Location & Room Areas
+    // =========================================================================
     match /locations/{locationId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canModuleAction('locations', 'view', true) && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canModuleAction('locations', 'create', isManager()) && canWriteDocBranch(request.resource.data);
+      allow update: if isAuthenticated() && isAccountActive() && canModuleAction('locations', 'edit', isManager()) && canUpdateDocBranch(resource.data, request.resource.data);
+      allow delete: if isAuthenticated() && isAccountActive() && canModuleAction('locations', 'delete', isManager()) && canAccessDocBranch(resource.data);
     }
 
+    // =========================================================================
     // Document Attachments & Handover Certificates
+    // =========================================================================
     match /documents/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if isAuthenticated() && isAccountActive() && canAccessDocBranch(resource.data);
+      allow create: if isAuthenticated() && isAccountActive() && canWriteDocBranch(request.resource.data);
+      allow update: if isAuthenticated() && isAccountActive() && canUpdateDocBranch(resource.data, request.resource.data);
+      allow delete: if isAuthenticated() && isAccountActive() && isManager() && canAccessDocBranch(resource.data);
     }
 
-    // Security Audit Log (Immutable record)
+    // =========================================================================
+    // Security Audit Log (Immutable record, append-only)
+    // =========================================================================
     match /auditLogs/{logId} {
-      allow read: if true;
-      allow create: if isAuthenticated();
+      allow read: if isAuthenticated() && isAccountActive() && isManager();
+      allow create: if isAuthenticated() && isAccountActive() && !('password' in request.resource.data);
       allow update, delete: if false;
     }
 
-    // Global Safety Net: default deny for unmapped paths
+    // =========================================================================
+    // Global Safety Net: Default-Deny Catch-All
+    // =========================================================================
     match /{document=**} {
       allow read, write: if false;
     }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Boxes,
   Plus,
@@ -10,13 +10,16 @@ import {
   RefreshCw,
   Edit2,
   Trash2,
-  ArrowRightLeft
+  ArrowRightLeft,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { InventoryItem, StockTransactionType } from '../types';
 import { Modal } from '../components/common/Modal';
 import { DeleteConfirmModal } from '../components/common/DeleteConfirmModal';
+import { Pagination } from '../components/common/Pagination';
 import { formatCurrency, formatNumber } from '../utils/formatters';
 import { exportToExcel } from '../utils/excel';
 
@@ -41,6 +44,15 @@ export const InventoryPage: React.FC = () => {
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Partial<InventoryItem> | null>(null);
   const [deleteModalItem, setDeleteModalItem] = useState<InventoryItem | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage((prev) => (prev === 1 ? prev : 1));
+  }, [searchTerm, categoryFilter, stockLevelFilter, selectedBranchId]);
 
   // Stock Transaction Modal
   const [isTxnModalOpen, setIsTxnModalOpen] = useState(false);
@@ -50,14 +62,17 @@ export const InventoryPage: React.FC = () => {
   const [txnReason, setTxnReason] = useState<string>('');
   const [txnTargetBranch, setTxnTargetBranch] = useState<string>('');
   const [txnRef, setTxnRef] = useState<string>('');
+  const [txnError, setTxnError] = useState<string | null>(null);
 
   const displayedInventory = useMemo(() => {
     return filteredInventory.filter((item) => {
+      if (!item) return false;
+      const term = (searchTerm || '').toLowerCase();
       const matchesSearch =
-        item.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.itemCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.supplierName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.warehouseLocation.toLowerCase().includes(searchTerm.toLowerCase());
+        String(item.itemName || '').toLowerCase().includes(term) ||
+        String(item.itemCode || '').toLowerCase().includes(term) ||
+        String(item.supplierName || '').toLowerCase().includes(term) ||
+        String(item.warehouseLocation || '').toLowerCase().includes(term);
 
       const matchesCat = categoryFilter === 'all' || item.category === categoryFilter;
 
@@ -71,6 +86,12 @@ export const InventoryPage: React.FC = () => {
       return matchesSearch && matchesCat && matchesLevel;
     });
   }, [filteredInventory, searchTerm, categoryFilter, stockLevelFilter]);
+
+  // High-performance paginated slice
+  const paginatedInventory = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return displayedInventory.slice(start, start + pageSize);
+  }, [displayedInventory, currentPage, pageSize]);
 
   const categories = useMemo(() => {
     return Array.from(new Set(filteredInventory.map((i) => i.category))).filter(Boolean);
@@ -102,40 +123,69 @@ export const InventoryPage: React.FC = () => {
       supplierName: '',
       remarks: ''
     });
+    setSubmitError(null);
     setIsItemModalOpen(true);
   };
 
   const handleOpenEditItem = (item: InventoryItem) => {
     setEditingItem({ ...item });
+    setSubmitError(null);
     setIsItemModalOpen(true);
+  };
+
+  const handleCloseItemModal = () => {
+    if (isSubmitting) return;
+    setIsItemModalOpen(false);
+    setEditingItem(null);
+    setSubmitError(null);
   };
 
   const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingItem || !editingItem.itemName || !editingItem.branchId) return;
+    if (!editingItem || !editingItem.itemName || !editingItem.branchId || isSubmitting) return;
 
-    const open = Number(editingItem.openingStock) || 0;
-    const inQty = Number(editingItem.stockIn) || 0;
-    const outQty = Number(editingItem.stockOut) || 0;
-    const adj = Number(editingItem.adjustments) || 0;
-    const cost = Number(editingItem.unitCost) || 0;
+    try {
+      setIsSubmitting(true);
+      setSubmitError(null);
+      const open = Number(editingItem.openingStock) || 0;
+      const inQty = Number(editingItem.stockIn) || 0;
+      const outQty = Number(editingItem.stockOut) || 0;
+      const adj = Number(editingItem.adjustments) || 0;
+      const cost = Number(editingItem.unitCost) || 0;
 
-    const current = open + inQty - outQty + adj;
-    const value = current * cost;
+      const current = open + inQty - outQty + adj;
+      const value = current * cost;
 
-    await saveInventoryItem({
-      ...editingItem,
-      openingStock: open,
-      stockIn: inQty,
-      stockOut: outQty,
-      adjustments: adj,
-      currentStock: current,
-      unitCost: cost,
-      stockValue: value
-    });
+      await saveInventoryItem({
+        ...editingItem,
+        openingStock: open,
+        stockIn: inQty,
+        stockOut: outQty,
+        adjustments: adj,
+        currentStock: current,
+        unitCost: cost,
+        stockValue: value
+      });
 
-    setIsItemModalOpen(false);
-    setEditingItem(null);
+      // Dialog automatically closes ONLY after Firestore mutation succeeds
+      setIsItemModalOpen(false);
+      setEditingItem(null);
+    } catch (err: any) {
+      console.error('Failed to save inventory item:', err);
+      const rawMsg = err?.message || String(err || '');
+      if (
+        rawMsg.includes('Missing or insufficient permissions') ||
+        rawMsg.includes('permission-denied')
+      ) {
+        setSubmitError(
+          'Permission Denied: Your account role is not authorized to edit inventory for this branch.'
+        );
+      } else {
+        setSubmitError(rawMsg && rawMsg.length < 160 ? rawMsg : 'Failed to save inventory SKU. Please try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleOpenTransaction = (item: InventoryItem, type: StockTransactionType) => {
@@ -144,24 +194,47 @@ export const InventoryPage: React.FC = () => {
     setTxnQty(type === 'STOCK_IN' ? 10 : 5);
     setTxnReason(type === 'STOCK_IN' ? 'Supplier Delivery Restock' : 'Issued to Kitchen / Service');
     setTxnRef(`TXN-${Date.now().toString().slice(-5)}`);
+    setTxnError(null);
     setIsTxnModalOpen(true);
   };
 
   const handleExecuteTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeTxnItem) return;
+    if (!activeTxnItem || isSubmitting) return;
 
-    await recordStockTransaction({
-      inventoryItemId: activeTxnItem.id,
-      transactionType: txnType,
-      quantity: Number(txnQty),
-      reason: txnReason,
-      targetBranchId: txnTargetBranch,
-      referenceNumber: txnRef
-    });
+    try {
+      setIsSubmitting(true);
+      setTxnError(null);
+      await recordStockTransaction({
+        inventoryItemId: activeTxnItem.id,
+        transactionType: txnType,
+        quantity: Number(txnQty),
+        reason: txnReason,
+        targetBranchId: txnTargetBranch,
+        referenceNumber: txnRef
+      });
 
-    setIsTxnModalOpen(false);
-    setActiveTxnItem(null);
+      // Dialog automatically closes ONLY after Firestore mutation succeeds
+      setIsTxnModalOpen(false);
+      setActiveTxnItem(null);
+    } catch (err: any) {
+      console.error('Failed to record stock transaction:', err);
+      const rawMsg = err?.message || String(err || '');
+      if (
+        rawMsg.includes('Missing or insufficient permissions') ||
+        rawMsg.includes('permission-denied')
+      ) {
+        setTxnError(
+          'Permission Denied: Your account role does not have authorization to adjust inventory stock.'
+        );
+      } else {
+        setTxnError(
+          rawMsg && rawMsg.length < 160 ? rawMsg : 'Failed to record stock transaction. Please try again.'
+        );
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleExport = () => {
@@ -196,35 +269,55 @@ export const InventoryPage: React.FC = () => {
     <div className="space-y-6">
       {/* Metric Cards Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Total Active SKUs</span>
-          <span className="text-xl font-bold font-mono text-slate-900 mt-1 block">
-            {totalSKUs} items
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-600" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Total Active SKUs
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">Tracked food, packaging & supplies</span>
+          <span className="text-2xl font-bold font-mono text-slate-900 mt-1 block tabular-nums">
+            {totalSKUs} <span className="text-sm font-sans font-normal text-slate-500">items</span>
+          </span>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            Tracked consumables, packaging & ingredients
+          </span>
         </div>
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Total Inventory Valuation</span>
-          <span className="text-xl font-bold font-mono text-slate-900 mt-1 block">
+
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-emerald-500" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Total Inventory Valuation
+          </span>
+          <span className="text-2xl font-bold font-mono text-slate-900 mt-1 block tabular-nums">
             {formatCurrency(totalStockValue, settings.currencySymbol)}
           </span>
-          <span className="text-[11px] text-emerald-600 font-medium mt-0.5 block">Live balance in stock</span>
+          <span className="text-[11px] text-emerald-600 font-medium mt-1 block">
+            Live balance in warehouse storage
+          </span>
         </div>
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Low Stock Alerts</span>
+
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className={`absolute top-0 left-0 right-0 h-[2px] ${lowStockCount > 0 ? 'bg-amber-500' : 'bg-slate-300'}`} />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Stock Health Status
+          </span>
           <span
-            className={`text-xl font-bold font-mono mt-1 block ${
+            className={`text-2xl font-bold font-mono mt-1 block tabular-nums ${
               lowStockCount > 0 ? 'text-amber-600' : 'text-slate-900'
             }`}
           >
-            {lowStockCount} below minimum
+            {lowStockCount}{' '}
+            <span className="text-sm font-sans font-normal text-slate-500">
+              {lowStockCount === 1 ? 'item low' : 'items below min'}
+            </span>
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">Reorder threshold breached</span>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            {lowStockCount > 0 ? 'Reorder threshold triggered' : 'All SKUs above minimum threshold'}
+          </span>
         </div>
       </div>
 
       {/* Action & Filter Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-lg border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200/90 shadow-xs">
         <div className="flex flex-wrap items-center gap-3 flex-1">
           <div className="relative flex-1 min-w-[200px] max-w-xs">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
@@ -233,14 +326,14 @@ export const InventoryPage: React.FC = () => {
               placeholder="Search SKU code, name, supplier..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-md focus:bg-white focus:outline-hidden"
+              className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
             />
           </div>
 
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-700 focus:bg-white focus:outline-hidden"
+            className="py-2 px-3 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-700 font-medium focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
           >
             <option value="all">All Categories</option>
             {categories.map((c) => (
@@ -253,7 +346,7 @@ export const InventoryPage: React.FC = () => {
           <select
             value={stockLevelFilter}
             onChange={(e) => setStockLevelFilter(e.target.value as any)}
-            className="py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-700 focus:bg-white focus:outline-hidden"
+            className="py-2 px-3 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-700 font-medium focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
           >
             <option value="all">All Stock Levels</option>
             <option value="low">Low Stock Only</option>
@@ -261,17 +354,17 @@ export const InventoryPage: React.FC = () => {
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={handleExport}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5"
+            className="min-h-[38px] px-3.5 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3.5 h-3.5 text-slate-500" />
             <span>Export Excel</span>
           </button>
           <button
             onClick={handleOpenCreateItem}
-            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5"
+            className="min-h-[38px] px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>New Inventory Item</span>
@@ -280,7 +373,7 @@ export const InventoryPage: React.FC = () => {
       </div>
 
       {/* Inventory Display: Desktop Table + Mobile Responsive Cards */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-xs">
+      <div className="bg-white rounded-xl border border-slate-200/90 overflow-hidden shadow-xs">
         {/* Desktop Table View */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -299,7 +392,7 @@ export const InventoryPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {displayedInventory.map((item) => {
+              {paginatedInventory.map((item) => {
                 const branch = branches.find((b) => b.id === item.branchId);
                 const isLow = item.currentStock <= item.minimumLevel;
                 const isOut = item.currentStock <= 0;
@@ -406,7 +499,7 @@ export const InventoryPage: React.FC = () => {
 
         {/* Mobile Phone Cards View (Optimized for 320px - 767px) */}
         <div className="block md:hidden divide-y divide-slate-100 p-2 sm:p-3 space-y-2.5">
-          {displayedInventory.map((item) => {
+          {paginatedInventory.map((item) => {
             const branch = branches.find((b) => b.id === item.branchId);
             const isLow = item.currentStock <= item.minimumLevel;
             const isOut = item.currentStock <= 0;
@@ -515,10 +608,18 @@ export const InventoryPage: React.FC = () => {
           })}
         </div>
 
-        {displayedInventory.length === 0 && (
+        {displayedInventory.length === 0 ? (
           <div className="p-12 text-center text-slate-500 text-xs">
             No inventory items found. Click "New Inventory Item" to register stock.
           </div>
+        ) : (
+          <Pagination
+            currentPage={currentPage}
+            totalItems={displayedInventory.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
         )}
       </div>
 
@@ -526,12 +627,19 @@ export const InventoryPage: React.FC = () => {
       {isTxnModalOpen && activeTxnItem && (
         <Modal
           isOpen={isTxnModalOpen}
-          onClose={() => setIsTxnModalOpen(false)}
+          onClose={() => { if (!isSubmitting) setIsTxnModalOpen(false); }}
           title={`Record Stock ${txnType.replace('_', ' ')}`}
           subtitle={`Item: ${activeTxnItem.itemName} (${activeTxnItem.itemCode}) · Current: ${activeTxnItem.currentStock} ${activeTxnItem.unit}`}
           maxWidth="md"
         >
           <form onSubmit={handleExecuteTransaction} className="space-y-4">
+            {txnError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex-1 font-medium leading-relaxed">{txnError}</div>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">
                 Transaction Type
@@ -614,16 +722,19 @@ export const InventoryPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
               <button
                 type="button"
+                disabled={isSubmitting}
                 onClick={() => setIsTxnModalOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md"
+                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md"
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                Confirm Transaction
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSubmitting ? 'Recording...' : 'Confirm Transaction'}</span>
               </button>
             </div>
           </form>
@@ -634,12 +745,19 @@ export const InventoryPage: React.FC = () => {
       {isItemModalOpen && editingItem && (
         <Modal
           isOpen={isItemModalOpen}
-          onClose={() => setIsItemModalOpen(false)}
+          onClose={handleCloseItemModal}
           title={editingItem.id ? 'Edit Inventory SKU' : 'New Inventory Item'}
           subtitle="Configure stock thresholds, units, and supplier details"
           maxWidth="2xl"
         >
           <form onSubmit={handleSaveItem} className="space-y-4">
+            {submitError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <div className="flex-1 font-medium leading-relaxed">{submitError}</div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -808,16 +926,19 @@ export const InventoryPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setIsItemModalOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md"
+                disabled={isSubmitting}
+                onClick={handleCloseItemModal}
+                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md"
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                {editingItem.id ? 'Save Changes' : 'Create Item'}
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSubmitting ? 'Saving...' : editingItem.id ? 'Save Changes' : 'Create Item'}</span>
               </button>
             </div>
           </form>

@@ -1,29 +1,125 @@
-import React, { useState } from 'react';
-import { Settings, Save, Download, CheckCircle2, Building, ShieldCheck, Mail, Globe } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Settings, Save, Download, CheckCircle2, Building, ShieldCheck, Mail, Globe, ShieldAlert, AlertCircle, Loader2, Users } from 'lucide-react';
 import { useData } from '../context/DataContext';
+import { useAuth } from '../context/AuthContext';
 import { SystemSettings } from '../types';
 import { BRAND } from '../config/brand';
 import { MKInnovexaLogo } from '../components/brand/MKInnovexaLogo';
+import { UsersPage } from './UsersPage';
 
 export const SettingsPage: React.FC = () => {
   const { settings, updateSettings } = useData();
+  const { canManageSettings, isSuperManager } = useAuth();
 
+  const [settingsSubTab, setSettingsSubTab] = useState<'system' | 'access'>('system');
   const [formSettings, setFormSettings] = useState<SystemSettings>({ ...settings });
+  const [isDirty, setIsDirty] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Synchronize initial settings from database once loaded, but never overwrite active typing
+  useEffect(() => {
+    if (!isDirty && settings && Object.keys(settings).length > 0) {
+      setFormSettings((prev) => {
+        const prevJson = JSON.stringify(prev);
+        const nextJson = JSON.stringify(settings);
+        return prevJson === nextJson ? prev : { ...settings };
+      });
+    }
+  }, [settings, isDirty]);
+
+  const handleFieldChange = <K extends keyof SystemSettings>(field: K, value: SystemSettings[K]) => {
+    setIsDirty(true);
+    setFormSettings((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings(formSettings);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+    if (isSubmitting) return;
+    try {
+      setIsSubmitting(true);
+      setErrorMessage(null);
+      setSaveSuccess(false);
+      await updateSettings(formSettings);
+      setIsDirty(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err: any) {
+      console.error('Failed to update settings:', err);
+      const rawMsg = err?.message || String(err || '');
+      if (
+        rawMsg.includes('Missing or insufficient permissions') ||
+        rawMsg.includes('permission-denied')
+      ) {
+        setErrorMessage(
+          'Permission Denied: Only Super Manager accounts have authorization to alter organizational settings.'
+        );
+      } else {
+        setErrorMessage(
+          rawMsg && rawMsg.length < 160 ? rawMsg : 'Failed to update settings. Please try again.'
+        );
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDownloadBackup = () => {
     window.open('/api/state', '_blank');
   };
 
+  if (settingsSubTab === 'access') {
+    return (
+      <div className="space-y-6">
+        <div className="flex border-b border-slate-200 bg-white rounded-lg p-1.5 shadow-xs gap-2">
+          <button
+            type="button"
+            onClick={() => setSettingsSubTab('system')}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer text-slate-600 hover:bg-slate-100"
+          >
+            <Settings className="w-4 h-4" />
+            <span>System & Organizational Settings</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSettingsSubTab('access')}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer bg-blue-600 text-white shadow-xs"
+          >
+            <Users className="w-4 h-4" />
+            <span>Users, Roles & Access</span>
+          </button>
+        </div>
+        <UsersPage />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
+      {/* Subtab Navigation */}
+      <div className="flex border-b border-slate-200 bg-white rounded-lg p-1.5 shadow-xs gap-2">
+        <button
+          type="button"
+          onClick={() => setSettingsSubTab('system')}
+          className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer bg-blue-600 text-white shadow-xs"
+        >
+          <Settings className="w-4 h-4" />
+          <span>System & Organizational Settings</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSettingsSubTab('access')}
+          className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer text-slate-600 hover:bg-slate-100"
+        >
+          <Users className="w-4 h-4" />
+          <span>Users, Roles & Access</span>
+        </button>
+      </div>
+
       {/* Top Banner */}
       <div className="bg-white p-5 rounded-lg border border-slate-200">
         <h2 className="text-sm font-bold text-slate-900">
@@ -33,6 +129,22 @@ export const SettingsPage: React.FC = () => {
           Configure corporate branding, Pakistani Rupee currency formatting, sales tax rates, and maintenance threshold triggers.
         </p>
       </div>
+
+      {!canManageSettings && (
+        <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-xs flex items-center gap-2.5">
+          <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            <strong>Read-Only Access:</strong> Organizational settings and fiscal parameters can only be modified by accounts with the <strong>Super Manager</strong> role.
+          </span>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
 
       {saveSuccess && (
         <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center gap-2">
@@ -56,7 +168,7 @@ export const SettingsPage: React.FC = () => {
                 type="text"
                 required
                 value={formSettings.companyName || ''}
-                onChange={(e) => setFormSettings({ ...formSettings, companyName: e.target.value })}
+                onChange={(e) => handleFieldChange('companyName', e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-hidden"
               />
             </div>
@@ -68,7 +180,7 @@ export const SettingsPage: React.FC = () => {
               <input
                 type="text"
                 value={formSettings.companyTagline || ''}
-                onChange={(e) => setFormSettings({ ...formSettings, companyTagline: e.target.value })}
+                onChange={(e) => handleFieldChange('companyTagline', e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-hidden"
               />
             </div>
@@ -87,7 +199,7 @@ export const SettingsPage: React.FC = () => {
               <input
                 type="text"
                 value={formSettings.currency || 'PKR'}
-                onChange={(e) => setFormSettings({ ...formSettings, currency: e.target.value })}
+                onChange={(e) => handleFieldChange('currency', e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono focus:outline-hidden"
               />
             </div>
@@ -99,7 +211,7 @@ export const SettingsPage: React.FC = () => {
               <input
                 type="text"
                 value={formSettings.currencySymbol || 'Rs.'}
-                onChange={(e) => setFormSettings({ ...formSettings, currencySymbol: e.target.value })}
+                onChange={(e) => handleFieldChange('currencySymbol', e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono focus:outline-hidden"
               />
             </div>
@@ -113,7 +225,7 @@ export const SettingsPage: React.FC = () => {
                 min="0"
                 max="100"
                 value={formSettings.taxRate ?? 16}
-                onChange={(e) => setFormSettings({ ...formSettings, taxRate: Number(e.target.value) })}
+                onChange={(e) => handleFieldChange('taxRate', Number(e.target.value))}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono focus:outline-hidden"
               />
             </div>
@@ -124,7 +236,7 @@ export const SettingsPage: React.FC = () => {
               </label>
               <select
                 value={formSettings.dateFormat || 'DD-MM-YYYY'}
-                onChange={(e) => setFormSettings({ ...formSettings, dateFormat: e.target.value })}
+                onChange={(e) => handleFieldChange('dateFormat', e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md bg-white focus:outline-hidden"
               >
                 <option value="DD-MM-YYYY">DD-MM-YYYY (Recommended standard)</option>
@@ -147,7 +259,7 @@ export const SettingsPage: React.FC = () => {
                 type="number"
                 min="1"
                 value={formSettings.lowStockThreshold ?? 10}
-                onChange={(e) => setFormSettings({ ...formSettings, lowStockThreshold: Number(e.target.value) })}
+                onChange={(e) => handleFieldChange('lowStockThreshold', Number(e.target.value))}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono focus:outline-hidden"
               />
             </div>
@@ -160,7 +272,7 @@ export const SettingsPage: React.FC = () => {
                 type="number"
                 min="7"
                 value={formSettings.warrantyAlertDays ?? 60}
-                onChange={(e) => setFormSettings({ ...formSettings, warrantyAlertDays: Number(e.target.value) })}
+                onChange={(e) => handleFieldChange('warrantyAlertDays', Number(e.target.value))}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono focus:outline-hidden"
               />
             </div>
@@ -173,22 +285,25 @@ export const SettingsPage: React.FC = () => {
                 type="number"
                 min="3"
                 value={formSettings.maintenanceAlertDays ?? 14}
-                onChange={(e) => setFormSettings({ ...formSettings, maintenanceAlertDays: Number(e.target.value) })}
+                onChange={(e) => handleFieldChange('maintenanceAlertDays', Number(e.target.value))}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono focus:outline-hidden"
               />
             </div>
           </div>
         </div>
 
-        <div className="pt-4 border-t border-slate-200 flex justify-end">
-          <button
-            type="submit"
-            className="px-5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5"
-          >
-            <Save className="w-4 h-4" />
-            <span>Save System Settings</span>
-          </button>
-        </div>
+        {canManageSettings && (
+          <div className="pt-4 border-t border-slate-200 flex justify-end">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-xs"
+            >
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              <span>{isSubmitting ? 'Saving Settings...' : 'Save System Settings'}</span>
+            </button>
+          </div>
+        )}
       </form>
 
       {/* Production Backup & Data Management */}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Plus,
   Search,
@@ -12,13 +12,16 @@ import {
   ShieldAlert,
   Clock,
   MapPin,
-  Building
+  Building,
+  AlertCircle
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { Asset, AssetCategory, AssetCondition, AssetStatus } from '../../types';
 import { Modal } from '../common/Modal';
 import { DeleteConfirmModal } from '../common/DeleteConfirmModal';
+import { Pagination } from '../common/Pagination';
+import { SkeletonTable } from '../common/Skeleton';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { exportToExcel } from '../../utils/excel';
 
@@ -66,6 +69,15 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Partial<Asset> | null>(null);
   const [deleteModalAsset, setDeleteModalAsset] = useState<Asset | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage((prev) => (prev === 1 ? prev : 1));
+  }, [searchTerm, selectedSubcategory, selectedStatus, selectedCondition, category, selectedBranchId]);
 
   // Filter items
   const displayedAssets = useMemo(() => {
@@ -77,16 +89,17 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
           ? a.category === 'electrical' || a.category === 'lighting'
           : a.category === category;
 
-      const branch = branches.find((b) => b.id === a.branchId);
+      const branch = branches.find((b) => b?.id === a?.branchId);
+      const term = (searchTerm || '').toLowerCase();
 
       const matchesSearch =
-        a.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.brand.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.serialNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.locationName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.specification.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (branch?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+        String(a?.itemName || '').toLowerCase().includes(term) ||
+        String(a?.brand || '').toLowerCase().includes(term) ||
+        String(a?.model || '').toLowerCase().includes(term) ||
+        String(a?.serialNumber || '').toLowerCase().includes(term) ||
+        String(a?.locationName || '').toLowerCase().includes(term) ||
+        String(a?.specification || '').toLowerCase().includes(term) ||
+        String(branch?.name || '').toLowerCase().includes(term);
 
       const matchesSubcat = selectedSubcategory === 'all' || a.subcategory === selectedSubcategory;
       const matchesStatus = selectedStatus === 'all' || a.status === selectedStatus;
@@ -107,6 +120,12 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
   // Aggregate stats
   const totalAssetsCount = displayedAssets.reduce((sum, a) => sum + (Number(a.quantity) || 1), 0);
   const totalAssetsValue = displayedAssets.reduce((sum, a) => sum + (Number(a.totalCost) || 0), 0);
+
+  // High-performance paginated slice
+  const paginatedAssets = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return displayedAssets.slice(start, start + pageSize);
+  }, [displayedAssets, currentPage, pageSize]);
 
   const handleOpenCreate = () => {
     const targetBranchId = selectedBranchId !== 'all' ? selectedBranchId : branches[0]?.id || '';
@@ -147,36 +166,65 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
       status: 'In Use',
       remarks: ''
     });
+    setSubmitError(null);
     setIsFormOpen(true);
   };
 
   const handleOpenEdit = (asset: Asset) => {
     setEditingAsset({ ...asset });
+    setSubmitError(null);
     setIsFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    if (isSubmitting) return;
+    setIsFormOpen(false);
+    setEditingAsset(null);
+    setSubmitError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingAsset || !editingAsset.branchId || !editingAsset.itemName) return;
+    if (!editingAsset || !editingAsset.branchId || !editingAsset.itemName || isSubmitting) return;
 
-    const qty = Number(editingAsset.quantity) || 1;
-    const rate = Number(editingAsset.unitCost) || 0;
-    const computedTotal = qty * rate;
+    try {
+      setIsSubmitting(true);
+      setSubmitError(null);
+      const qty = Number(editingAsset.quantity) || 1;
+      const rate = Number(editingAsset.unitCost) || 0;
+      const computedTotal = qty * rate;
 
-    // Resolve location name
-    const loc = locations.find((l) => l.id === editingAsset.locationId);
-    const locName = loc ? loc.name : editingAsset.locationName || 'Main Area';
+      // Resolve location name
+      const loc = locations.find((l) => l.id === editingAsset.locationId);
+      const locName = loc ? loc.name : editingAsset.locationName || 'Main Area';
 
-    await saveAsset({
-      ...editingAsset,
-      quantity: qty,
-      unitCost: rate,
-      totalCost: computedTotal,
-      locationName: locName
-    });
+      await saveAsset({
+        ...editingAsset,
+        quantity: qty,
+        unitCost: rate,
+        totalCost: computedTotal,
+        locationName: locName
+      });
 
-    setIsFormOpen(false);
-    setEditingAsset(null);
+      // Dialog automatically closes ONLY after Firestore mutation succeeds
+      setIsFormOpen(false);
+      setEditingAsset(null);
+    } catch (err: any) {
+      console.error('Failed to save asset:', err);
+      const rawMsg = err?.message || String(err || '');
+      if (
+        rawMsg.includes('Missing or insufficient permissions') ||
+        rawMsg.includes('permission-denied')
+      ) {
+        setSubmitError(
+          'Permission Denied: Your account role is not authorized to modify assets in this branch.'
+        );
+      } else {
+        setSubmitError(rawMsg && rawMsg.length < 160 ? rawMsg : 'Failed to save asset. Please try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleExport = () => {
@@ -213,33 +261,49 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
     <div className="space-y-6">
       {/* Metric Cards Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Total Installed Assets</span>
-          <span className="text-xl font-bold font-mono text-slate-900 mt-1 block">
-            {totalAssetsCount} units
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-600" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Total Installed Assets
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">{displayedAssets.length} asset entries</span>
+          <span className="text-2xl font-bold font-mono text-slate-900 mt-1 block tabular-nums">
+            {totalAssetsCount} <span className="text-sm font-sans font-normal text-slate-500">units</span>
+          </span>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            {displayedAssets.length} verified registry entries
+          </span>
         </div>
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Total Valuation</span>
-          <span className="text-xl font-bold font-mono text-slate-900 mt-1 block">
+
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-emerald-500" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Total Asset Valuation
+          </span>
+          <span className="text-2xl font-bold font-mono text-slate-900 mt-1 block tabular-nums">
             {formatCurrency(totalAssetsValue, settings.currencySymbol)}
           </span>
-          <span className="text-[11px] text-emerald-600 font-medium mt-0.5 block">Capital equipment verified</span>
-        </div>
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Operational Status</span>
-          <span className="text-xl font-bold font-mono text-emerald-700 mt-1 block">
-            {displayedAssets.filter((a) => a.status === 'In Use').length} Active In Use
+          <span className="text-[11px] text-emerald-600 font-medium mt-1 block">
+            Capital equipment registered & audited
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">
-            {displayedAssets.filter((a) => a.status === 'Under Maintenance').length} under service
+        </div>
+
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-500" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Operational Status
+          </span>
+          <span className="text-2xl font-bold font-mono text-emerald-700 mt-1 block tabular-nums">
+            {displayedAssets.filter((a) => a.status === 'In Use').length}{' '}
+            <span className="text-sm font-sans font-normal text-slate-500">Active In Use</span>
+          </span>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            {displayedAssets.filter((a) => a.status === 'Under Maintenance').length} currently under service
           </span>
         </div>
       </div>
 
       {/* Action & Filter Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-lg border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200/90 shadow-xs">
         <div className="flex flex-wrap items-center gap-3 flex-1">
           <div className="relative flex-1 min-w-[200px] max-w-xs">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
@@ -248,7 +312,7 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
               placeholder="Search item, brand, serial, area..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-md focus:bg-white focus:outline-hidden"
+              className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
             />
           </div>
 
@@ -256,7 +320,7 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
             <select
               value={selectedSubcategory}
               onChange={(e) => setSelectedSubcategory(e.target.value)}
-              className="py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-700 focus:bg-white focus:outline-hidden"
+              className="py-2 px-3 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-700 font-medium focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
             >
               <option value="all">All Subcategories</option>
               {supportedSubcategories.map((sc) => (
@@ -270,7 +334,7 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
-            className="py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-700 focus:bg-white focus:outline-hidden"
+            className="py-2 px-3 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-700 font-medium focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
           >
             <option value="all">All Statuses</option>
             <option value="In Use">In Use</option>
@@ -282,17 +346,17 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={handleExport}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5"
+            className="min-h-[38px] px-3.5 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3.5 h-3.5 text-slate-500" />
             <span>Export Excel</span>
           </button>
           <button
             onClick={handleOpenCreate}
-            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5"
+            className="min-h-[38px] px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Asset Item</span>
@@ -301,7 +365,7 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
       </div>
 
       {/* Assets Display: Desktop Table + Mobile Responsive Cards */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-xs">
+      <div className="bg-white rounded-xl border border-slate-200/90 overflow-hidden shadow-xs">
         {/* Desktop & Tablet Table View */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -321,7 +385,7 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {displayedAssets.map((asset) => {
+              {paginatedAssets.map((asset) => {
                 const branch = branches.find((b) => b.id === asset.branchId);
 
                 return (
@@ -421,7 +485,7 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
 
         {/* Mobile Phone Cards View (Optimized for 320px - 767px) */}
         <div className="block md:hidden divide-y divide-slate-100 p-2 sm:p-3 space-y-2.5">
-          {displayedAssets.map((asset) => {
+          {paginatedAssets.map((asset) => {
             const branch = branches.find((b) => b.id === asset.branchId);
 
             return (
@@ -502,10 +566,18 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
           })}
         </div>
 
-        {displayedAssets.length === 0 && (
+        {displayedAssets.length === 0 ? (
           <div className="p-12 text-center text-slate-500 text-xs">
             No assets found. Click "Add Asset Item" to record what has been installed in the branch.
           </div>
+        ) : (
+          <Pagination
+            currentPage={currentPage}
+            totalItems={displayedAssets.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
         )}
       </div>
 
@@ -513,12 +585,19 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
       {isFormOpen && editingAsset && (
         <Modal
           isOpen={isFormOpen}
-          onClose={() => setIsFormOpen(false)}
+          onClose={handleCloseForm}
           title={editingAsset.id ? `Edit ${editingAsset.itemName}` : `Add New Asset (${moduleTitle})`}
           subtitle="Record installation location, technical specifications, and quantities"
           maxWidth="3xl"
         >
           <form onSubmit={handleSave} className="space-y-4">
+            {submitError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <div className="flex-1 font-medium leading-relaxed">{submitError}</div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -930,16 +1009,18 @@ export const AssetModuleView: React.FC<AssetModuleViewProps> = ({
             <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setIsFormOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md"
+                disabled={isSubmitting}
+                onClick={handleCloseForm}
+                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md"
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                {editingAsset.id ? 'Save Asset' : 'Record Asset'}
+                {isSubmitting ? 'Saving...' : editingAsset.id ? 'Save Asset' : 'Record Asset'}
               </button>
             </div>
           </form>

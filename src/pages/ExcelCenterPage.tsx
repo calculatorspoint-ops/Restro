@@ -47,7 +47,7 @@ export const ExcelCenterPage: React.FC = () => {
       } else {
         // Validate required columns
         const missingCols = expectedTemplate.columns.filter(
-          (col) => !result.headers.some((h) => h.toLowerCase() === col.toLowerCase())
+          (col) => !result.headers.some((h) => String(h || '').toLowerCase() === String(col || '').toLowerCase())
         );
 
         if (missingCols.length > 0) {

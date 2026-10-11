@@ -12,13 +12,15 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
-  DollarSign
+  DollarSign,
+  Loader2
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { Branch, BranchStatus } from '../types';
 import { Modal } from '../components/common/Modal';
 import { DeleteConfirmModal } from '../components/common/DeleteConfirmModal';
+import { BranchFormModal } from '../components/branches/BranchFormModal';
 import { formatCurrency, formatDate } from '../utils/formatters';
 
 interface BranchesPageProps {
@@ -26,8 +28,16 @@ interface BranchesPageProps {
 }
 
 export const BranchesPage: React.FC<BranchesPageProps> = ({ onNavigateToBranchDetail }) => {
-  const { branches, saveBranch, deleteBranch, settings, setSelectedBranchId, getBranchCostBreakdown } = useData();
-  const { canManageBranches } = useAuth();
+  const {
+    branches,
+    saveBranch,
+    deleteBranch,
+    settings,
+    setSelectedBranchId,
+    getBranchCostBreakdown,
+    showNotification
+  } = useData();
+  const { canManageBranches, canDeleteBranches } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -42,23 +52,29 @@ export const BranchesPage: React.FC<BranchesPageProps> = ({ onNavigateToBranchDe
 
   // Filtered list
   const filteredBranches = branches.filter((b) => {
+    if (!b) return false;
+    const term = (searchTerm || '').toLowerCase();
     const matchesSearch =
-      b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.branchManager.toLowerCase().includes(searchTerm.toLowerCase());
+      String(b.name || '').toLowerCase().includes(term) ||
+      String(b.code || '').toLowerCase().includes(term) ||
+      String(b.city || '').toLowerCase().includes(term) ||
+      String(b.branchManager || '').toLowerCase().includes(term);
     const matchesStatus = statusFilter === 'all' || b.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   const handleOpenCreate = () => {
+    if (!canManageBranches) {
+      showNotification('Permission restricted: Manager or Super Manager privileges are required to create branches.', 'error');
+      return;
+    }
     setEditingBranch({
       code: `BR-0${branches.length + 1}`,
       name: '',
       address: '',
       city: 'Karachi',
       province: 'Sindh',
-      contactNumber: '+92 ',
+      contactNumber: '+92 21 ',
       branchManager: '',
       openingDate: new Date().toISOString().slice(0, 10),
       status: 'Setup in Progress',
@@ -69,16 +85,12 @@ export const BranchesPage: React.FC<BranchesPageProps> = ({ onNavigateToBranchDe
 
   const handleOpenEdit = (branch: Branch, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!canManageBranches) {
+      showNotification('Permission restricted: Manager or Super Manager privileges are required to edit branches.', 'error');
+      return;
+    }
     setEditingBranch({ ...branch });
     setIsFormOpen(true);
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingBranch || !editingBranch.name || !editingBranch.code) return;
-    await saveBranch(editingBranch);
-    setIsFormOpen(false);
-    setEditingBranch(null);
   };
 
   const getStatusColor = (status: BranchStatus) => {
@@ -134,7 +146,7 @@ export const BranchesPage: React.FC<BranchesPageProps> = ({ onNavigateToBranchDe
         {canManageBranches && (
           <button
             onClick={handleOpenCreate}
-            className="w-full sm:w-auto min-h-[42px] px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 shadow-xs"
+            className="w-full sm:w-auto min-h-[42px] px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add New Branch</span>
@@ -182,17 +194,19 @@ export const BranchesPage: React.FC<BranchesPageProps> = ({ onNavigateToBranchDe
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteModalBranch(branch);
-                        }}
-                        className="min-h-[36px] min-w-[36px] flex items-center justify-center text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 active:bg-rose-100"
-                        title="Delete Branch"
-                        aria-label={`Delete ${branch.name}`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {canDeleteBranches && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteModalBranch(branch);
+                          }}
+                          className="min-h-[36px] min-w-[36px] flex items-center justify-center text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 active:bg-rose-100"
+                          title="Delete Branch (Super Manager Only)"
+                          aria-label={`Delete ${branch.name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -399,173 +413,17 @@ export const BranchesPage: React.FC<BranchesPageProps> = ({ onNavigateToBranchDe
       )}
 
       {/* Create / Edit Branch Modal */}
-      {isFormOpen && editingBranch && (
-        <Modal
-          isOpen={isFormOpen}
-          onClose={() => setIsFormOpen(false)}
-          title={editingBranch.id ? 'Edit Branch' : 'Add New Restaurant Branch'}
-          subtitle="Configure location, manager, and setup timeline"
-          maxWidth="2xl"
-        >
-          <form onSubmit={handleSave} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Branch Code *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. KHI-04"
-                  value={editingBranch.code || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, code: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md font-mono focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Branch Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. DHA Phase 6 Express"
-                  value={editingBranch.name || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, name: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Full Street Address *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Commercial Plot 12-C, Main Boulevard"
-                  value={editingBranch.address || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, address: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  City *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Karachi, Lahore, Islamabad"
-                  value={editingBranch.city || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, city: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Province / Territory *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Sindh, Punjab, ICT, KPK"
-                  value={editingBranch.province || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, province: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Contact Phone Number
-                </label>
-                <input
-                  type="text"
-                  placeholder="+92 21 1234567"
-                  value={editingBranch.contactNumber || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, contactNumber: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md font-mono focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Branch / Project Manager
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Tariq Mehmood"
-                  value={editingBranch.branchManager || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, branchManager: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Opening / Launch Date
-                </label>
-                <input
-                  type="date"
-                  value={editingBranch.openingDate || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, openingDate: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Status *
-                </label>
-                <select
-                  value={editingBranch.status || 'Setup in Progress'}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, status: e.target.value as BranchStatus })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md bg-white focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                >
-                  <option value="Planning">Planning</option>
-                  <option value="Under Construction">Under Construction</option>
-                  <option value="Setup in Progress">Setup in Progress</option>
-                  <option value="Operational">Operational</option>
-                  <option value="Closed">Closed</option>
-                </select>
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Branch Notes & Architectural Scope
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Seating capacity, layout notes, kitchen size, lease terms..."
-                  value={editingBranch.notes || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, notes: e.target.value })}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
-                />
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => setIsFormOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md"
-              >
-                {editingBranch.id ? 'Save Changes' : 'Create Branch'}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
+      <BranchFormModal
+        isOpen={isFormOpen}
+        onClose={() => {
+          setIsFormOpen(false);
+          setEditingBranch(null);
+        }}
+        branch={editingBranch}
+        onSave={async (branchData) => {
+          await saveBranch(branchData);
+        }}
+      />
 
       {/* Delete Confirmation Modal */}
       {deleteModalBranch && (

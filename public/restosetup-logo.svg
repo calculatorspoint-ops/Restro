@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <rect width="120" height="120" rx="24" fill="#0C1322"/>
+  <rect x="1" y="1" width="118" height="118" rx="23" stroke="#D4AF37" stroke-opacity="0.35" stroke-width="1.5"/>
+  <path d="M24 24L96 24M24 96L96 96M24 24L24 96M96 24L96 96" stroke="#38BDF8" stroke-opacity="0.15" stroke-width="1" stroke-dasharray="4 4"/>
+  <path d="M38 88V32H62C72 32 79 38 79 47C79 55 73 60 64 62L82 88H68L52 64H50V88H38ZM50 54H61C66 54 68 52 68 47C68 43 65 41 60 41H50V54Z" fill="url(#goldGradient)"/>
+  <path d="M68 38L86 28L92 38" stroke="#D4AF37" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="86" cy="28" r="3" fill="#38BDF8"/>
+  <circle cx="38" cy="88" r="2.5" fill="#D4AF37"/>
+  <circle cx="82" cy="88" r="2.5" fill="#D4AF37"/>
+  <path d="M28 60H92" stroke="#D4AF37" stroke-opacity="0.2" stroke-width="1" stroke-dasharray="2 3"/>
+  <defs>
+    <linearGradient id="goldGradient" x1="38" y1="32" x2="82" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FCEBA7"/>
+      <stop offset="50%" stop-color="#D4AF37"/>
+      <stop offset="100%" stop-color="#AA8018"/>
+    </linearGradient>
+  </defs>
+</svg>

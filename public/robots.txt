@@ -1,0 +1,27 @@
+# robots.txt for RestoSetup ERP by MK Innovexa
+User-agent: *
+Disallow: /dashboard
+Disallow: /branches
+Disallow: /projects
+Disallow: /construction
+Disallow: /electrical
+Disallow: /hvac
+Disallow: /furniture
+Disallow: /kitchen
+Disallow: /it-pos
+Disallow: /assets
+Disallow: /inventory
+Disallow: /recipes
+Disallow: /purchases
+Disallow: /suppliers
+Disallow: /expenses
+Disallow: /handover
+Disallow: /branded-docs
+Disallow: /locations
+Disallow: /reports
+Disallow: /excel
+Disallow: /users
+Disallow: /settings
+Disallow: /audit
+Allow: /login
+Allow: /

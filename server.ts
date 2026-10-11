@@ -35,11 +35,21 @@ function generateInitialDatabase() {
     },
     users: [
       {
+        id: "usr-masteradmin",
+        name: "Muhammad Khurram",
+        email: "muhammadkhurram@gmail.com",
+        role: "super_manager",
+        isMasterAdmin: true,
+        assignedBranchIds: ["all"],
+        phone: "+92 300 1234567",
+        status: "active",
+        createdAt: "2026-01-01T08:00:00.000Z"
+      },
+      {
         id: "usr-superadmin",
         name: "Muhammad Khurram (Director Operations)",
         email: "admin@restosetup.com",
-        password: "admin123",
-        role: "super_admin",
+        role: "super_manager",
         assignedBranchIds: ["all"],
         phone: "+92 300 1234567",
         status: "active",
@@ -49,7 +59,6 @@ function generateInitialDatabase() {
         id: "usr-manager1",
         name: "Tariq Mehmood (Project Manager)",
         email: "manager@restosetup.com",
-        password: "manager123",
         role: "admin",
         assignedBranchIds: ["br-khi-01", "br-lhr-02"],
         phone: "+92 321 9876543",
@@ -60,7 +69,6 @@ function generateInitialDatabase() {
         id: "usr-staff1",
         name: "Bilal Ahmed (Site Inventory Supervisor)",
         email: "staff@restosetup.com",
-        password: "staff123",
         role: "staff",
         assignedBranchIds: ["br-khi-01"],
         phone: "+92 333 4567890",
@@ -1429,7 +1437,8 @@ function recalculateProjectCosts(db: any, branchId: string) {
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
   const db = loadDatabase();
-  const user = db.users.find((u: any) => u.email.toLowerCase() === (email || '').toLowerCase().trim());
+  const targetEmail = (email || '').toString().toLowerCase().trim();
+  const user = db.users.find((u: any) => (u.email || '').toString().toLowerCase().trim() === targetEmail);
 
   if (!user || user.password !== password) {
     return res.status(401).json({ error: 'Invalid email or password' });
@@ -1446,14 +1455,15 @@ app.post('/api/auth/register', (req, res) => {
   }
 
   const db = loadDatabase();
-  if (db.users.some((u: any) => u.email.toLowerCase() === email.toLowerCase().trim())) {
+  const targetEmail = (email || '').toString().toLowerCase().trim();
+  if (db.users.some((u: any) => (u.email || '').toString().toLowerCase().trim() === targetEmail)) {
     return res.status(400).json({ error: 'User with this email already exists' });
   }
 
   const newUser = {
     id: `usr-${Date.now()}`,
     name,
-    email: email.toLowerCase().trim(),
+    email: targetEmail,
     password,
     role,
     phone: phone || '',
@@ -1473,12 +1483,46 @@ app.post('/api/auth/register', (req, res) => {
 app.post('/api/auth/forgot-password', (req, res) => {
   const { email } = req.body;
   const db = loadDatabase();
-  const user = db.users.find((u: any) => u.email.toLowerCase() === (email || '').toLowerCase().trim());
+  const targetEmail = (email || '').toString().toLowerCase().trim();
+  const user = db.users.find((u: any) => (u.email || '').toString().toLowerCase().trim() === targetEmail);
   if (!user) {
     return res.status(404).json({ error: 'No account registered with this email address' });
   }
-  // In our ERP, simulate instant password reset PIN for ease of use
-  res.json({ message: `Password reset instructions sent. For demonstration, temporary password is '${user.password}'.` });
+  res.json({ message: 'If an account exists with this email address, password reset instructions have been dispatched.' });
+});
+
+app.post('/api/users/:id/change-password', (req, res) => {
+  const { id } = req.params;
+  const { newPassword, mustChangePassword } = req.body;
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  }
+
+  const db = loadDatabase();
+  const items = db.users || [];
+  const index = items.findIndex((u: any) => u.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  items[index].password = newPassword;
+  items[index].passwordLastChangedAt = new Date().toISOString();
+  if (mustChangePassword !== undefined) {
+    items[index].mustChangePassword = mustChangePassword;
+  }
+  items[index].updatedAt = new Date().toISOString();
+
+  logAudit(
+    db,
+    req.body._currentUser || { name: 'Admin', role: 'super_manager' },
+    'Updated',
+    'User',
+    id,
+    `Password changed for user ${items[index].name} (${items[index].email})`
+  );
+
+  saveDatabase(db);
+  res.json({ success: true, message: 'Password updated successfully' });
 });
 
 // 2. Full State Endpoint (for high speed single-load reactive hydration)
@@ -1511,12 +1555,21 @@ function registerCollectionRoutes(collectionName: string, singularName: string) 
   app.post(`/api/${collectionName}`, (req, res) => {
     const db = loadDatabase();
     if (!db[collectionName]) db[collectionName] = [];
+    const safeSingular = (singularName || 'item').toString().toLowerCase();
     const item = {
-      id: req.body.id || `${singularName.toLowerCase()}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: req.body.id || `${safeSingular}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       ...req.body,
       createdAt: req.body.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
+    if (collectionName === 'users') {
+      const existingIdx = (db.users || []).findIndex((u: any) => u.id === item.id || (item.email && (u.email || '').toLowerCase().trim() === (item.email || '').toLowerCase().trim()));
+      if (existingIdx !== -1) {
+        db.users[existingIdx] = { ...db.users[existingIdx], ...item, updatedAt: new Date().toISOString() };
+        saveDatabase(db);
+        return res.status(200).json(db.users[existingIdx]);
+      }
+    }
     db[collectionName].push(item);
 
     const currentUser = req.body._currentUser || { name: 'Admin', role: 'super_admin' };
@@ -1537,6 +1590,19 @@ function registerCollectionRoutes(collectionName: string, singularName: string) 
     const index = items.findIndex((i: any) => i.id === req.params.id);
     if (index === -1) {
       return res.status(404).json({ error: `${singularName} not found` });
+    }
+
+    if (collectionName === 'users') {
+      const isTargetMaster = items[index].isMasterAdmin === true ||
+        ['muhammadkhurram@gmail.com', 'muhammadkhurram682@gmail.com'].includes((items[index].email || '').toLowerCase().trim());
+      if (isTargetMaster) {
+        if (req.body.role && req.body.role !== 'super_manager') {
+          return res.status(403).json({ error: 'Master Admin role is permanently locked to Super Manager.' });
+        }
+        if (req.body.status && req.body.status !== 'active') {
+          return res.status(403).json({ error: 'Master Admin status cannot be deactivated.' });
+        }
+      }
     }
 
     const updated = {
@@ -1565,6 +1631,14 @@ function registerCollectionRoutes(collectionName: string, singularName: string) 
     const index = items.findIndex((i: any) => i.id === req.params.id);
     if (index === -1) {
       return res.status(404).json({ error: `${singularName} not found` });
+    }
+
+    if (collectionName === 'users') {
+      const isTargetMaster = items[index].isMasterAdmin === true ||
+        ['muhammadkhurram@gmail.com', 'muhammadkhurram682@gmail.com'].includes((items[index].email || '').toLowerCase().trim());
+      if (isTargetMaster) {
+        return res.status(403).json({ error: 'Master Admin account is permanently protected and cannot be deleted.' });
+      }
     }
 
     const deleted = items[index];

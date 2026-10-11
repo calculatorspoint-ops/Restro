@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ShoppingCart,
   Plus,
@@ -10,13 +10,16 @@ import {
   Trash2,
   FileText,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { PurchaseOrder, DeliveryStatus, PaymentStatus, PurchaseOrderItem } from '../types';
 import { Modal } from '../components/common/Modal';
 import { DeleteConfirmModal } from '../components/common/DeleteConfirmModal';
+import { Pagination } from '../components/common/Pagination';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { exportToExcel } from '../utils/excel';
 
@@ -39,15 +42,25 @@ export const PurchasesPage: React.FC = () => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingPO, setEditingPO] = useState<Partial<PurchaseOrder> | null>(null);
   const [deleteModalPO, setDeleteModalPO] = useState<PurchaseOrder | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  useEffect(() => {
+    setCurrentPage((prev) => (prev === 1 ? prev : 1));
+  }, [searchTerm, deliveryFilter, paymentFilter, selectedBranchId]);
 
   const displayedPOs = useMemo(() => {
     return filteredPurchases.filter((p) => {
-      const branch = branches.find((b) => b.id === p.branchId);
+      if (!p) return false;
+      const branch = branches.find((b) => b?.id === p.branchId);
+      const term = (searchTerm || '').toLowerCase();
       const matchesSearch =
-        p.poNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.supplierName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (branch?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+        String(p.poNumber || '').toLowerCase().includes(term) ||
+        String(p.supplierName || '').toLowerCase().includes(term) ||
+        String(p.invoiceNumber || '').toLowerCase().includes(term) ||
+        String(branch?.name || '').toLowerCase().includes(term);
 
       const matchesDelivery = deliveryFilter === 'all' || p.deliveryStatus === deliveryFilter;
       const matchesPayment = paymentFilter === 'all' || p.paymentStatus === paymentFilter;
@@ -55,6 +68,11 @@ export const PurchasesPage: React.FC = () => {
       return matchesSearch && matchesDelivery && matchesPayment;
     });
   }, [filteredPurchases, branches, searchTerm, deliveryFilter, paymentFilter]);
+
+  const paginatedPOs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return displayedPOs.slice(start, start + pageSize);
+  }, [displayedPOs, currentPage, pageSize]);
 
   const totalPurchasesValue = displayedPOs.reduce((sum, p) => sum + (Number(p.grandTotal) || 0), 0);
   const totalPaid = displayedPOs.reduce((sum, p) => sum + (Number(p.paidAmount) || 0), 0);
@@ -93,35 +111,64 @@ export const PurchasesPage: React.FC = () => {
       invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
       notes: ''
     });
+    setSubmitError(null);
     setIsFormOpen(true);
   };
 
   const handleOpenEdit = (po: PurchaseOrder) => {
     setEditingPO({ ...po });
+    setSubmitError(null);
     setIsFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    if (isSubmitting) return;
+    setIsFormOpen(false);
+    setEditingPO(null);
+    setSubmitError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingPO || !editingPO.branchId || !editingPO.poNumber) return;
+    if (!editingPO || !editingPO.branchId || !editingPO.poNumber || isSubmitting) return;
 
-    const sub = Number(editingPO.subtotal) || 0;
-    const disc = Number(editingPO.discount) || 0;
-    const tax = Number(editingPO.tax) || 0;
-    const grand = sub - disc + tax;
-    const paid = Number(editingPO.paidAmount) || 0;
+    try {
+      setIsSubmitting(true);
+      setSubmitError(null);
+      const sub = Number(editingPO.subtotal) || 0;
+      const disc = Number(editingPO.discount) || 0;
+      const tax = Number(editingPO.tax) || 0;
+      const grand = sub - disc + tax;
+      const paid = Number(editingPO.paidAmount) || 0;
 
-    await savePurchaseOrder({
-      ...editingPO,
-      subtotal: sub,
-      discount: disc,
-      tax,
-      grandTotal: grand,
-      paidAmount: paid
-    });
+      await savePurchaseOrder({
+        ...editingPO,
+        subtotal: sub,
+        discount: disc,
+        tax,
+        grandTotal: grand,
+        paidAmount: paid
+      });
 
-    setIsFormOpen(false);
-    setEditingPO(null);
+      // Dialog automatically closes ONLY after Firestore mutation succeeds
+      setIsFormOpen(false);
+      setEditingPO(null);
+    } catch (err: any) {
+      console.error('Failed to save purchase order:', err);
+      const rawMsg = err?.message || String(err || '');
+      if (
+        rawMsg.includes('Missing or insufficient permissions') ||
+        rawMsg.includes('permission-denied')
+      ) {
+        setSubmitError(
+          'Permission Denied: Your account role is not authorized to edit purchase orders for this branch.'
+        );
+      } else {
+        setSubmitError(rawMsg && rawMsg.length < 160 ? rawMsg : 'Failed to save purchase order. Please try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleExport = () => {
@@ -152,31 +199,48 @@ export const PurchasesPage: React.FC = () => {
     <div className="space-y-6">
       {/* Metric Cards Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Total Purchase Commitments</span>
-          <span className="text-xl font-bold font-mono text-slate-900 mt-1 block">
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-600" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Total Purchase Commitments
+          </span>
+          <span className="text-2xl font-bold font-mono text-slate-900 mt-1 block tabular-nums">
             {formatCurrency(totalPurchasesValue, settings.currencySymbol)}
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">{displayedPOs.length} PO contracts logged</span>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            {displayedPOs.length} PO contracts logged
+          </span>
         </div>
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Paid to Vendors</span>
-          <span className="text-xl font-bold font-mono text-emerald-700 mt-1 block">
+
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-emerald-500" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Paid to Vendors
+          </span>
+          <span className="text-2xl font-bold font-mono text-emerald-700 mt-1 block tabular-nums">
             {formatCurrency(totalPaid, settings.currencySymbol)}
           </span>
-          <span className="text-[11px] text-emerald-600 font-medium mt-0.5 block">Disbursed balance</span>
+          <span className="text-[11px] text-emerald-600 font-medium mt-1 block">
+            Disbursed vendor payments
+          </span>
         </div>
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Outstanding Payment Balance</span>
-          <span className="text-xl font-bold font-mono text-amber-700 mt-1 block">
+
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-amber-500" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Outstanding Payment Balance
+          </span>
+          <span className="text-2xl font-bold font-mono text-amber-700 mt-1 block tabular-nums">
             {formatCurrency(totalPending, settings.currencySymbol)}
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">Vendor pending payables</span>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            Vendor pending payables
+          </span>
         </div>
       </div>
 
       {/* Action & Filter Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-lg border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200/90 shadow-xs">
         <div className="flex flex-wrap items-center gap-3 flex-1">
           <div className="relative flex-1 min-w-[200px] max-w-xs">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
@@ -185,14 +249,14 @@ export const PurchasesPage: React.FC = () => {
               placeholder="Search PO#, supplier, invoice..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-md focus:bg-white focus:outline-hidden"
+              className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
             />
           </div>
 
           <select
             value={deliveryFilter}
             onChange={(e) => setDeliveryFilter(e.target.value)}
-            className="py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-700 focus:bg-white focus:outline-hidden"
+            className="py-2 px-3 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-700 font-medium focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
           >
             <option value="all">All Delivery Statuses</option>
             <option value="Received">Received</option>
@@ -204,7 +268,7 @@ export const PurchasesPage: React.FC = () => {
           <select
             value={paymentFilter}
             onChange={(e) => setPaymentFilter(e.target.value)}
-            className="py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-700 focus:bg-white focus:outline-hidden"
+            className="py-2 px-3 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-700 font-medium focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
           >
             <option value="all">All Payment Statuses</option>
             <option value="Paid">Paid</option>
@@ -213,17 +277,17 @@ export const PurchasesPage: React.FC = () => {
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={handleExport}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5"
+            className="min-h-[38px] px-3.5 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3.5 h-3.5 text-slate-500" />
             <span>Export Excel</span>
           </button>
           <button
             onClick={handleOpenCreate}
-            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5"
+            className="min-h-[38px] px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>New Purchase Order</span>
@@ -232,7 +296,7 @@ export const PurchasesPage: React.FC = () => {
       </div>
 
       {/* PO Display: Desktop Table + Mobile Responsive Cards */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-xs">
+      <div className="bg-white rounded-xl border border-slate-200/90 overflow-hidden shadow-xs">
         {/* Desktop Table View */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -251,7 +315,7 @@ export const PurchasesPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {displayedPOs.map((po) => {
+              {paginatedPOs.map((po) => {
                 const branch = branches.find((b) => b.id === po.branchId);
 
                 return (
@@ -336,7 +400,7 @@ export const PurchasesPage: React.FC = () => {
 
         {/* Mobile Phone Cards View (Optimized for 320px - 767px) */}
         <div className="block md:hidden divide-y divide-slate-100 p-2 sm:p-3 space-y-2.5">
-          {displayedPOs.map((po) => {
+          {paginatedPOs.map((po) => {
             const branch = branches.find((b) => b.id === po.branchId);
 
             return (
@@ -418,10 +482,18 @@ export const PurchasesPage: React.FC = () => {
           })}
         </div>
 
-        {displayedPOs.length === 0 && (
+        {displayedPOs.length === 0 ? (
           <div className="p-12 text-center text-slate-500 text-xs">
             No purchase orders found. Click "New Purchase Order" to generate an official equipment or supply purchase.
           </div>
+        ) : (
+          <Pagination
+            currentPage={currentPage}
+            totalItems={displayedPOs.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
         )}
       </div>
 
@@ -429,12 +501,19 @@ export const PurchasesPage: React.FC = () => {
       {isFormOpen && editingPO && (
         <Modal
           isOpen={isFormOpen}
-          onClose={() => setIsFormOpen(false)}
+          onClose={handleCloseForm}
           title={editingPO.id ? `Edit Purchase Order (${editingPO.poNumber})` : 'New Purchase Order'}
           subtitle="Generate purchase request, calculate taxes and delivery schedule"
           maxWidth="3xl"
         >
           <form onSubmit={handleSave} className="space-y-4">
+            {submitError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <div className="flex-1 font-medium leading-relaxed">{submitError}</div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -661,16 +740,25 @@ export const PurchasesPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setIsFormOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md"
+                disabled={isSubmitting}
+                onClick={handleCloseForm}
+                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md"
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                {editingPO.id ? 'Save Purchase Order' : 'Issue Purchase Order'}
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>
+                  {isSubmitting
+                    ? 'Saving...'
+                    : editingPO.id
+                    ? 'Save Purchase Order'
+                    : 'Issue Purchase Order'}
+                </span>
               </button>
             </div>
           </form>

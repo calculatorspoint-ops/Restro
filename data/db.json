@@ -15,7 +15,6 @@
       "id": "usr-superadmin",
       "name": "Muhammad Khurram (Director Operations)",
       "email": "admin@restosetup.com",
-      "password": "admin123",
       "role": "super_admin",
       "assignedBranchIds": [
         "all"
@@ -28,7 +27,6 @@
       "id": "usr-manager1",
       "name": "Tariq Mehmood (Project Manager)",
       "email": "manager@restosetup.com",
-      "password": "manager123",
       "role": "admin",
       "assignedBranchIds": [
         "br-khi-01",
@@ -42,7 +40,6 @@
       "id": "usr-staff1",
       "name": "Bilal Ahmed (Site Inventory Supervisor)",
       "email": "staff@restosetup.com",
-      "password": "staff123",
       "role": "staff",
       "assignedBranchIds": [
         "br-khi-01"

@@ -9,22 +9,31 @@ interface ToastProps {
 
 export const Toast: React.FC<ToastProps> = ({ message, type = 'success', onClose }) => {
   const Icon = type === 'error' ? AlertCircle : type === 'info' ? Info : CheckCircle2;
-  const bgClass =
+  const styleClass =
     type === 'error'
-      ? 'bg-rose-900/90 text-rose-50 border-rose-700'
+      ? 'bg-white text-rose-800 border-rose-200 shadow-lg shadow-rose-900/5'
       : type === 'info'
-      ? 'bg-sky-900/90 text-sky-50 border-sky-700'
-      : 'bg-emerald-900/90 text-emerald-50 border-emerald-700';
+      ? 'bg-white text-blue-800 border-blue-200 shadow-lg shadow-blue-900/5'
+      : 'bg-white text-emerald-800 border-emerald-200 shadow-lg shadow-emerald-900/5';
+
+  const iconClass =
+    type === 'error'
+      ? 'text-rose-600'
+      : type === 'info'
+      ? 'text-blue-600'
+      : 'text-emerald-600';
 
   return (
     <div
-      className={`fixed bottom-5 right-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-lg shadow-lg border backdrop-blur-xs text-xs font-medium max-w-md transition-all animate-in fade-in slide-in-from-bottom-2 ${bgClass}`}
+      className={`fixed bottom-5 right-5 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl border text-xs font-medium max-w-md transition-all animate-in fade-in slide-in-from-bottom-2 ${styleClass}`}
+      role="status"
     >
-      <Icon className="w-4 h-4 shrink-0" />
-      <span className="flex-1">{message}</span>
+      <Icon className={`w-4 h-4 shrink-0 ${iconClass}`} />
+      <span className="flex-1 text-slate-800 font-medium">{message}</span>
       <button
         onClick={onClose}
-        className="p-1 hover:bg-white/10 rounded-sm transition-colors text-white/70 hover:text-white"
+        className="p-1 hover:bg-slate-100 rounded-md transition-colors text-slate-400 hover:text-slate-700 cursor-pointer"
+        aria-label="Dismiss notification"
       >
         <X className="w-3.5 h-3.5" />
       </button>

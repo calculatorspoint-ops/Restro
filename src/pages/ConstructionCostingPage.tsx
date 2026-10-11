@@ -9,7 +9,9 @@ import {
   DollarSign,
   Edit2,
   Trash2,
-  FileText
+  FileText,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
@@ -57,17 +59,21 @@ export const ConstructionCostingPage: React.FC = () => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingCost, setEditingCost] = useState<Partial<ConstructionCost> | null>(null);
   const [deleteModalCost, setDeleteModalCost] = useState<ConstructionCost | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Filters
   const displayedCosts = useMemo(() => {
     return filteredConstructionCosts.filter((c) => {
-      const branch = branches.find((b) => b.id === c.branchId);
+      if (!c) return false;
+      const branch = branches.find((b) => b?.id === c.branchId);
+      const term = (searchTerm || '').toLowerCase();
       const matchesSearch =
-        c.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.vendorContractor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.workArea.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.invoiceRefNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (branch?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+        String(c.description || '').toLowerCase().includes(term) ||
+        String(c.vendorContractor || '').toLowerCase().includes(term) ||
+        String(c.workArea || '').toLowerCase().includes(term) ||
+        String(c.invoiceRefNumber || '').toLowerCase().includes(term) ||
+        String(branch?.name || '').toLowerCase().includes(term);
 
       const matchesCat = categoryFilter === 'all' || c.category === categoryFilter;
       const matchesPay = paymentFilter === 'all' || c.paymentStatus === paymentFilter;
@@ -103,40 +109,72 @@ export const ConstructionCostingPage: React.FC = () => {
       invoiceRefNumber: '',
       remarks: ''
     });
+    setSubmitError(null);
     setIsFormOpen(true);
   };
 
   const handleOpenEdit = (cost: ConstructionCost) => {
     setEditingCost({ ...cost });
+    setSubmitError(null);
     setIsFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    if (isSubmitting) return;
+    setIsFormOpen(false);
+    setEditingCost(null);
+    setSubmitError(null);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingCost || !editingCost.branchId || !editingCost.description) return;
+    if (!editingCost || !editingCost.branchId || !editingCost.description || isSubmitting) return;
 
-    const mat = Number(editingCost.materialCost) || 0;
-    const lab = Number(editingCost.labourCost) || 0;
-    const oth = Number(editingCost.otherCost) || 0;
+    try {
+      setIsSubmitting(true);
+      setSubmitError(null);
 
-    let computedTotal = mat + lab + oth;
-    if (computedTotal === 0 && (editingCost.quantity || 0) > 0 && (editingCost.unitRate || 0) > 0) {
-      computedTotal = (Number(editingCost.quantity) || 1) * (Number(editingCost.unitRate) || 0);
+      const mat = Number(editingCost.materialCost) || 0;
+      const lab = Number(editingCost.labourCost) || 0;
+      const oth = Number(editingCost.otherCost) || 0;
+
+      let computedTotal = mat + lab + oth;
+      if (computedTotal === 0 && (editingCost.quantity || 0) > 0 && (editingCost.unitRate || 0) > 0) {
+        computedTotal = (Number(editingCost.quantity) || 1) * (Number(editingCost.unitRate) || 0);
+      }
+
+      const paid = Number(editingCost.paidAmount) || 0;
+
+      await saveConstructionCost({
+        ...editingCost,
+        materialCost: mat,
+        labourCost: lab,
+        otherCost: oth,
+        totalCost: computedTotal,
+        paidAmount: paid
+      });
+
+      // Dialog automatically closes ONLY after Firestore mutation succeeds
+      setIsFormOpen(false);
+      setEditingCost(null);
+    } catch (err: any) {
+      console.error('Failed to save construction cost:', err);
+      const rawMsg = err?.message || String(err || '');
+      if (
+        rawMsg.includes('Missing or insufficient permissions') ||
+        rawMsg.includes('permission-denied')
+      ) {
+        setSubmitError(
+          'Permission Denied: Your account role is not authorized to modify construction records in this branch.'
+        );
+      } else {
+        setSubmitError(
+          rawMsg && rawMsg.length < 160 ? rawMsg : 'Failed to save milestone to database. Please try again.'
+        );
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const paid = Number(editingCost.paidAmount) || 0;
-
-    await saveConstructionCost({
-      ...editingCost,
-      materialCost: mat,
-      labourCost: lab,
-      otherCost: oth,
-      totalCost: computedTotal,
-      paidAmount: paid
-    });
-
-    setIsFormOpen(false);
-    setEditingCost(null);
   };
 
   const handleExport = () => {
@@ -172,33 +210,48 @@ export const ConstructionCostingPage: React.FC = () => {
     <div className="space-y-6">
       {/* Metric Header Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Total Construction Cost</span>
-          <span className="text-xl font-bold font-mono text-slate-900 mt-1 block">
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-blue-600" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Total Construction Cost
+          </span>
+          <span className="text-2xl font-bold font-mono text-slate-900 mt-1 block tabular-nums">
             {formatCurrency(totalCost, settings.currencySymbol)}
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">{displayedCosts.length} milestones logged</span>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            {displayedCosts.length} civil & MEP milestones logged
+          </span>
         </div>
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Disbursed / Paid Amount</span>
-          <span className="text-xl font-bold font-mono text-emerald-700 mt-1 block">
+
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-emerald-500" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Disbursed / Paid Amount
+          </span>
+          <span className="text-2xl font-bold font-mono text-emerald-700 mt-1 block tabular-nums">
             {formatCurrency(paidCost, settings.currencySymbol)}
           </span>
-          <span className="text-[11px] text-emerald-600 font-medium mt-0.5 block">
-            {totalCost > 0 ? ((paidCost / totalCost) * 100).toFixed(1) : 0}% settled
+          <span className="text-[11px] text-emerald-600 font-medium mt-1 block">
+            {totalCost > 0 ? ((paidCost / totalCost) * 100).toFixed(1) : 0}% settled to contractors
           </span>
         </div>
-        <div className="p-4 bg-white rounded-lg border border-slate-200">
-          <span className="text-xs font-medium text-slate-500 block">Outstanding / Pending Balance</span>
-          <span className="text-xl font-bold font-mono text-amber-700 mt-1 block">
+
+        <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-all">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-amber-500" />
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono block">
+            Outstanding / Pending Balance
+          </span>
+          <span className="text-2xl font-bold font-mono text-amber-700 mt-1 block tabular-nums">
             {formatCurrency(unpaidCost, settings.currencySymbol)}
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">Contractor retentions & balance</span>
+          <span className="text-[11px] text-slate-400 mt-1 block">
+            Contractor retentions & payable milestones
+          </span>
         </div>
       </div>
 
       {/* Action & Filter Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-lg border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200/90 shadow-xs">
         <div className="flex flex-wrap items-center gap-3 flex-1">
           <div className="relative flex-1 min-w-[200px] max-w-xs">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
@@ -207,14 +260,14 @@ export const ConstructionCostingPage: React.FC = () => {
               placeholder="Search contractor, area, ref..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-md focus:bg-white focus:outline-hidden"
+              className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
             />
           </div>
 
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-700 focus:bg-white focus:outline-hidden"
+            className="py-2 px-3 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-700 font-medium focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
           >
             <option value="all">All Categories</option>
             {CONSTRUCTION_CATEGORIES.map((cat) => (
@@ -227,7 +280,7 @@ export const ConstructionCostingPage: React.FC = () => {
           <select
             value={paymentFilter}
             onChange={(e) => setPaymentFilter(e.target.value)}
-            className="py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-700 focus:bg-white focus:outline-hidden"
+            className="py-2 px-3 text-xs bg-slate-50/70 border border-slate-200 rounded-lg text-slate-700 font-medium focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
           >
             <option value="all">All Payments</option>
             <option value="Paid">Paid</option>
@@ -236,17 +289,17 @@ export const ConstructionCostingPage: React.FC = () => {
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={handleExport}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5"
+            className="min-h-[38px] px-3.5 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3.5 h-3.5 text-slate-500" />
             <span>Export Excel</span>
           </button>
           <button
             onClick={handleOpenCreate}
-            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5"
+            className="min-h-[38px] px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Construction Item</span>
@@ -255,7 +308,7 @@ export const ConstructionCostingPage: React.FC = () => {
       </div>
 
       {/* Main Records Container: Responsive Mobile Cards (< md) + Desktop Table (>= md) */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+      <div className="bg-white rounded-xl border border-slate-200/90 overflow-hidden shadow-xs">
         {/* Mobile View (< md): High-density touch-friendly cards */}
         <div className="md:hidden divide-y divide-slate-100">
           {displayedCosts.map((cost) => {
@@ -433,12 +486,19 @@ export const ConstructionCostingPage: React.FC = () => {
       {isFormOpen && editingCost && (
         <Modal
           isOpen={isFormOpen}
-          onClose={() => setIsFormOpen(false)}
+          onClose={handleCloseForm}
           title={editingCost.id ? 'Edit Construction Item' : 'Add Construction & Fit-out Cost'}
           subtitle="Record civil work, flooring, ceiling, painting, or contractor payments"
           maxWidth="3xl"
         >
           <form onSubmit={handleSave} className="space-y-4">
+            {submitError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <div className="flex-1 font-medium leading-relaxed">{submitError}</div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -738,16 +798,25 @@ export const ConstructionCostingPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-200 flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setIsFormOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md"
+                disabled={isSubmitting}
+                onClick={handleCloseForm}
+                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md"
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                {editingCost.id ? 'Save Milestone' : 'Record Cost'}
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>
+                  {isSubmitting
+                    ? 'Saving...'
+                    : editingCost.id
+                    ? 'Save Milestone'
+                    : 'Record Cost'}
+                </span>
               </button>
             </div>
           </form>
