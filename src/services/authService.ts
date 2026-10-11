@@ -115,18 +115,30 @@ export const authService = {
 
     // Determine initial role: primary enterprise owners are super_manager, manager is manager, others default to 'staff'
     const normalizedEmail = (email || '').trim().toLowerCase();
-    const isOwner = normalizedEmail === 'muhammadkhurram682@gmail.com' || normalizedEmail === 'admin@restosetup.com';
+    const isMaster =
+      MASTER_ADMIN_UIDS.includes(fbUser.uid) ||
+      normalizedEmail === 'muhammadkhurram@gmail.com' ||
+      normalizedEmail === 'muhammadkhurram682@gmail.com';
+    const isOwner = isMaster || normalizedEmail === 'admin@restosetup.com';
     const isDefaultManager = normalizedEmail === 'manager@restosetup.com';
     const role: UserRole = isOwner ? 'super_manager' : (isDefaultManager ? 'manager' : 'staff');
+
+    // SECURITY FIX (FINDING-003):
+    // Non-owner self-registrations get no branch access and 'pending' status.
+    // A Super Manager must activate the account and assign branches before the user
+    // can access any ERP data. Firestore rules treat any status != 'active' as inactive.
+    const assignedBranchIds: string[] = isMaster ? ['all'] : (isOwner ? ['all'] : []);
+    const status = isMaster ? 'active' : (isOwner ? 'active' : 'pending');
 
     const profile: AuthProfile = {
       id: fbUser.uid,
       name: fullName,
       email: fbUser.email || email.trim(),
       role,
-      assignedBranchIds: ['all'],
+      isMasterAdmin: isMaster ? true : false,
+      assignedBranchIds,
       phone: '',
-      status: 'active',
+      status: status as 'active' | 'inactive',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       emailVerified: fbUser.emailVerified,
@@ -277,15 +289,25 @@ export const authService = {
     // SECURITY: Do not query by arbitrary unverified email or inherit elevated roles from untrusted docs.
     const initialRole: UserRole = isMaster || isOwner ? 'super_manager' : (isDefaultManager ? 'manager' : 'staff');
 
+    // SECURITY FIX (FINDING-003):
+    // First-time sign-in users who are not pre-provisioned owners get:
+    //   - assignedBranchIds: [] (no branch data access until an admin assigns branches)
+    //   - status: 'pending'    (Firestore rules treat any non-'active' status as inactive,
+    //                           blocking all reads/writes until a Super Manager activates them)
+    // The AuthorizedRoute component already renders a clear "Account Inactive / Suspended"
+    // screen for users whose status is not 'active'.
+    const newAssignedBranchIds: string[] = isMaster ? ['all'] : (isOwner ? ['all'] : []);
+    const newStatus = isMaster ? 'active' : (isOwner ? 'active' : 'pending');
+
     const newProfile: AuthProfile = {
       id: fbUser.uid,
       name: fbUser.displayName || fbUser.email?.split('@')[0] || (isMaster ? 'Muhammad Khurram' : 'Staff Member'),
       email: fbUser.email || '',
       role: initialRole,
       isMasterAdmin: isMaster ? true : false,
-      assignedBranchIds: isMaster ? ['all'] : ['all'],
+      assignedBranchIds: newAssignedBranchIds,
       phone: fbUser.phoneNumber || '',
-      status: isMaster ? 'active' : 'active',
+      status: newStatus as 'active' | 'inactive',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       emailVerified: fbUser.emailVerified,

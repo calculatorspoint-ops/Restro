@@ -43,6 +43,7 @@ export const AuthorizedRoute: React.FC<AuthorizedRouteProps> = ({
 
   // If user account is inactive / suspended in Firestore
   if (check.isInactive) {
+    const isPending = currentUser?.status === 'pending';
     return (
       <div className="max-w-xl mx-auto my-12 p-8 bg-white rounded-xl border border-rose-200 shadow-sm text-center space-y-5">
         <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto border border-rose-200 shadow-xs">
@@ -50,10 +51,12 @@ export const AuthorizedRoute: React.FC<AuthorizedRouteProps> = ({
         </div>
         <div>
           <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-            Account Inactive / Suspended
+            {isPending ? 'Account Pending Approval' : 'Account Inactive / Suspended'}
           </h2>
           <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-            Your user profile has been marked inactive by your organization's Super Manager. All ERP read and write capabilities are temporarily suspended.
+            {isPending
+              ? 'Your account has been created and is awaiting activation by a Super Manager. Please contact your system administrator to have your account approved and branch access assigned.'
+              : 'Your user profile has been marked inactive by your organization\'s Super Manager. All ERP read and write capabilities are temporarily suspended.'}
           </p>
         </div>
         <div className="p-3 bg-slate-50 rounded-lg text-xs font-mono text-slate-600 border border-slate-200">

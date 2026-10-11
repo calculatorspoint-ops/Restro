@@ -7,4 +7,6 @@ coverage/
 .env*
 !.env.example
 .vercel
+# Firebase applet config contains real credentials — use Vercel env vars instead
+firebase-applet-config.json
 
