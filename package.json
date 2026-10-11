@@ -8,8 +8,10 @@
     "build": "vite build",
     "start": "tsx server.ts",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "push": "git add -A && git commit -m \"Update Restro app\" && git push origin master",
+    "deploy": "git add -A && git commit -m \"Deploy to production\" && git push origin master",
+    "auto-sync": "node scripts/auto-sync.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
